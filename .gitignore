@@ -5,3 +5,5 @@ recordings/
 *.png
 run_log.txt
 run_err.txt
+FUTURE.md
+ghostrec-desktop-app.md
