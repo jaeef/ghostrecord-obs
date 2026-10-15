@@ -26,6 +26,7 @@ A Python-powered OBS automation tool that locks onto a single window by its Wind
 | 🎬 **Auto Scene** | Creates a dedicated OBS scene with only the window capture source — no manual setup needed. |
 | 🔇 **Audio Monitoring** | Warns when sound goes silent for too long. |
 | 🔄 **Loop Picker** | Record multiple windows back-to-back without restarting. |
+| 🖥️ **Desktop App** | PyQt6 GUI: searchable window picker, live preview, recording status, recordings library with details, tray notifications. |
 | ⚡ **One-Click Launcher** | `start_recorder.bat` handles deps, OBS connection, and opens the picker. |
 
 ---
@@ -63,6 +64,18 @@ python setup.py
 # Run
 python record.py
 ```
+
+### Option 3: Desktop App (GUI) — recommended
+
+```bash
+# Same repo, same config.json
+python app.py
+```
+
+Or double-click `start_gui.bat`. The desktop app adds a window picker with
+search, a live recording view (timer, audio meter, warnings), a recordings
+library, dark theme, and system-tray notifications. The CLI keeps working —
+both share `config.json`.
 
 ---
 
@@ -197,11 +210,16 @@ On machines with Intel integrated graphics, Window Capture may record **black** 
 
 ```
 ghostrec-obs/
-├── record.py              # Main script
+├── app.py                 # Desktop app entry point (PyQt6 GUI)
+├── ghostrec/              # Shared core + GUI package
+│   ├── core/              #   config, windows, obs, recorder, library
+│   └── ui/                #   PyQt6 pages, tray, theme
+├── record.py              # CLI front-end (same core)
 ├── setup.py               # Dependency & config helper
 ├── config.example.json    # Config template
 ├── requirements.txt       # Python dependencies
-├── start_recorder.bat     # One-click launcher
+├── start_gui.bat          # One-click GUI launcher
+├── start_recorder.bat     # One-click CLI launcher
 ├── open_class_browser.bat # GPU-disabled Chrome helper
 ├── .gitignore
 └── README.md
