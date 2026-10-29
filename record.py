@@ -274,7 +274,9 @@ def main():
 
     ensure_scene_and_source(req, cfg["capture_scene_name"],
                             cfg["capture_source_name"],
-                            log=lambda tag, text: print(f"[{tag}] {text}"))
+                            log=lambda tag, text: print(f"[{tag}] {text}"),
+                            method=cfg.get("capture", {}).get("method", 2),
+                            kind=cfg.get("capture", {}).get("source", "window"))
 
     audio = None
     if cfg["audio"].get("check"):

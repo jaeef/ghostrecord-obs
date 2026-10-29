@@ -26,11 +26,13 @@ from datetime import datetime
 
 import obsws_python as obsws
 
+from ghostrec.core.apps import is_record_friendly, is_throttle_prone
 from ghostrec.core.obs import (check_scene_safety, ensure_scene_and_source,
                                fit_source_to_canvas, point_source_at,
                                stop_and_finalize)
 from ghostrec.core.windows import (get_window_info, is_window_alive,
-                                   is_window_minimized, obs_window_value)
+                                   is_window_covered, is_window_minimized,
+                                   obs_window_value)
 
 
 def sanitize_recording_name(raw):
@@ -99,6 +101,7 @@ class RecorderSession:
         self._stop = threading.Event()
         self._thread = None
         self._result = None
+        self._throttle_safe = False  # target keeps rendering when covered
 
     # -- control ---------------------------------------------------------- #
 
@@ -140,17 +143,46 @@ class RecorderSession:
             self._result = status
             self.emit({"type": "finished", "result": status})
 
+    def _detect_throttle_risk(self):
+        """Does the target app stop painting itself when covered?
+
+        Chrome/Electron apps do, unless they were started with the
+        anti-throttle flags. When the app is safe we stop nagging about
+        occlusion warnings (they would be noise).
+        """
+        win = self.window
+        exe = (win.get("exe") or "").lower()
+        if not is_throttle_prone(exe):
+            self._throttle_safe = True
+            return
+        friendly = is_record_friendly(win.get("pid"))
+        self._throttle_safe = bool(friendly)
+        self.emit({"type": "capture_advice", "exe": exe, "friendly": friendly,
+                   "window_title": win.get("title", "")})
+        if not friendly:
+            self._log("pin", "this app stops rendering when covered — open the "
+                             "recording-friendly Chrome for a sharp video")
+
     def _record(self):
         cfg = self.cfg
         scene = cfg["capture_scene_name"]
         source = cfg["capture_source_name"]
         poll = float(cfg.get("poll_seconds", 3))
         audio_cfg = cfg.get("audio", {})
+        capture_cfg = cfg.get("capture", {})
+        method = capture_cfg.get("method", 2)
+        kind = capture_cfg.get("source", "window")
         req = self.req
 
+        if cfg.get("capture", {}).get("auto", True):
+            self._detect_throttle_risk()
+        else:
+            self._throttle_safe = True
+
         # (re)build the dedicated single-window scene, aim it, switch to it
-        ensure_scene_and_source(req, scene, source, log=self._log)
-        point_source_at(req, source, self.window)
+        ensure_scene_and_source(req, scene, source, log=self._log,
+                                method=method, kind=kind)
+        point_source_at(req, source, self.window, method=method, kind=kind)
         fit_source_to_canvas(req, scene, source, log=self._log)
         req.set_current_program_scene(scene)  # record ONLY this window
 
@@ -203,7 +235,8 @@ class RecorderSession:
         if self.audio:
             self.audio.reset()
         self.emit({"type": "started", "name": self.name,
-                   "window_title": pinned["title"], "hwnd": pinned["hwnd"]})
+                   "window_title": pinned["title"], "hwnd": pinned["hwnd"],
+                   "pid": pinned.get("pid", 0)})
 
         trigger = "window_closed"
         output_active = True
@@ -238,7 +271,8 @@ class RecorderSession:
                     self._log("pin", "window title changed — re-locking the "
                                      f"SAME window: '{fresh['title'][:60]}'")
                     self.emit({"type": "relocked", "title": fresh["title"]})
-                    point_source_at(req, source, fresh)
+                    point_source_at(req, source, fresh, method=method,
+                                    kind=kind)
                     last_pointed = obs_window_value(fresh)
                 pinned = fresh
 
@@ -250,6 +284,19 @@ class RecorderSession:
                         "(behind other windows is fine).")
                 self._log("pin", f"⚠ {text}")
                 self.emit({"type": "warning", "kind": "minimized", "text": text})
+                last_min_warn = time.time()
+
+            # 2b2) covered? Windows stops rendering occluded windows, so the
+            # capture can go soft/frozen until the window is visible again
+            covered = False if minimized else is_window_covered(pinned["hwnd"])
+            if (covered and kind != "game" and not self._throttle_safe
+                    and time.time() - last_min_warn > min_warn_sec):
+                text = ("window is COVERED by another window — Windows stops "
+                        "rendering hidden windows, so the video may look "
+                        "soft/frozen. Click it once, or switch Settings → "
+                        "Capture source to Game Capture.")
+                self._log("pin", f"⚠ {text}")
+                self.emit({"type": "warning", "kind": "occluded", "text": text})
                 last_min_warn = time.time()
 
             # 2c) audio-alive check
@@ -269,8 +316,10 @@ class RecorderSession:
                        "elapsed": time.time() - rec_started,
                        "pinned_title": pinned["title"],
                        "hwnd": pinned["hwnd"],
+                       "pid": pinned.get("pid", 0),
                        "output_active": output_active,
                        "minimized": minimized,
+                       "covered": covered,
                        "audio_check": bool(self.audio and audio_cfg.get("check")),
                        "audio_db": self.audio.last_db() if self.audio else -100.0,
                        "silent_for": self.audio.silent_for() if self.audio else 0.0})

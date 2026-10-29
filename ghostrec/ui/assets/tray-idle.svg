@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="plate1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#31353D"/>
+      <stop offset="0.46" stop-color="#1B1E24"/>
+      <stop offset="1" stop-color="#090A0D"/>
+    </linearGradient>
+    <linearGradient id="rim1" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.34"/>
+      <stop offset="0.30" stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="0.72" stop-color="#000000" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.45"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="244" height="244" rx="58" fill="url(#plate1)"/>
+  <rect x="6.5" y="6.5" width="243" height="243" rx="57.5" fill="none"
+        stroke="url(#rim1)" stroke-width="1.5"/>
+  <g stroke="#DCE3EE" stroke-width="12" stroke-linecap="round"
+     stroke-linejoin="round" fill="none">
+    <path d="M 50 104 V 50 H 104"/><path d="M 152 50 H 206 V 104"/><path d="M 50 152 V 206 H 104"/><path d="M 152 206 H 206 V 152"/>
+  </g>
+  <path d="M 94 164 V 116 a 34 34 0 0 1 68 0 V 164 a 11.33 11.33 0 0 1 -22.67 0 a 11.33 11.33 0 0 1 -22.66 0 a 11.33 11.33 0 0 1 -22.67 0 Z" fill="#FFFFFF"/><ellipse cx="114" cy="119" rx="5.5" ry="9" fill="#0A0B0F"/><ellipse cx="142" cy="119" rx="5.5" ry="9" fill="#0A0B0F"/>
+</svg>

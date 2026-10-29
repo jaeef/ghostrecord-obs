@@ -94,6 +94,10 @@ The first run of `start_recorder.bat` (or `setup.py`) creates `config.json`. You
   "capture_source_name": "ClassCapture",
   "output_folder": "./recordings",
   "poll_seconds": 3,
+  "capture": {
+    "method": 2,
+    "source": "window",
+  },
   "audio": {
     "check": true,
     "input_name": "Desktop Audio",
@@ -113,6 +117,9 @@ The first run of `start_recorder.bat` (or `setup.py`) creates `config.json`. You
 | `capture_source_name` | `ClassCapture` | OBS window capture source name |
 | `output_folder` | `./recordings` | Where saved videos go |
 | `poll_seconds` | `3` | Status check interval (seconds) |
+| `capture.method` | `2` | Window Capture method: `0` automatic, `1` BitBlt (sharpest, but records what covers the window), `2` Windows Graphics Capture |
+| `capture.source` | `window` | `window` = Window Capture (records covered windows, but can blur while fully covered because Windows stops rendering occluded windows). `game` = Game Capture: renders the app offscreen, so it stays sharp while you work in other apps. |
+| `capture.auto` | `true` | Auto-detect apps that stop rendering when covered (Chrome, Teams, VS Code…) and offer the recording-friendly launcher instead of nagging. |
 | `audio.check` | `true` | Enable silence detection |
 | `audio.input_name` | `Desktop Audio` | Audio input name in OBS |
 | `audio.silence_db` | `-55.0` | Silence threshold (dB) |
@@ -202,6 +209,7 @@ On machines with Intel integrated graphics, Window Capture may record **black** 
 | 🪟 Windows only | Uses Win32 API (`win32gui`, `win32process`) |
 | 🔴 OBS must stay open | Can be minimized, but not closed |
 | ❄️ Minimized windows | Recording freezes — keep window open behind others |
+| 🪟 Fully covered windows | Windows stops rendering occluded windows, so Window Capture can blur/freeze until the window is touched. Switch **Settings → Capture source → Game Capture** (renders offscreen, unaffected by covering), or enable `capture.keep_on_top` (the window then floats above your other work). |
 | 🎥 Recording quality | Controlled by OBS Settings → Output → Recording |
 
 ---
@@ -212,8 +220,11 @@ On machines with Intel integrated graphics, Window Capture may record **black** 
 ghostrec-obs/
 ├── app.py                 # Desktop app entry point (PyQt6 GUI)
 ├── ghostrec/              # Shared core + GUI package
-│   ├── core/              #   config, windows, obs, recorder, library
-│   └── ui/                #   PyQt6 pages, tray, theme
+│   ├── core/              #   config, windows, obs, recorder, library, apps
+│   │   └── ...
+│   └── ui/                #   PyQt6 shell: pages, tray, theme, branding
+│       ├── pages/         #     picker, live, library, settings
+│       └── assets/        #     icon.svg, icon-dark.svg, app.ico, …
 ├── record.py              # CLI front-end (same core)
 ├── setup.py               # Dependency & config helper
 ├── config.example.json    # Config template
@@ -224,6 +235,18 @@ ghostrec-obs/
 ├── .gitignore
 └── README.md
 ```
+
+### Where new code goes
+
+| Adding | Put it in |
+|--------|-----------|
+| OBS/Windows logic, config, recording | `ghostrec/core/` (no Qt imports) |
+| Screen or widget | `ghostrec/ui/pages/` |
+| Reusable widget | `ghostrec/ui/widgets.py` |
+| Colors, QSS | `ghostrec/ui/theme.py` |
+| Icons, logo helpers | `ghostrec/ui/assets/` + `ghostrec/ui/branding.py` |
+| Background worker | `ghostrec/ui/preview.py`, or a new `ghostrec/core/*` module |
+| CLI flag | `record.py` (shares the same core) |
 
 ---
 

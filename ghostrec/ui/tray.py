@@ -1,33 +1,17 @@
 """System tray icon: recording state, quick actions, notifications."""
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QAction, QIcon
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
-from ghostrec.ui import theme
-
-
-def _dot_icon(color):
-    pm = QPixmap(64, 64)
-    pm.fill(Qt.GlobalColor.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(QColor(color))
-    p.drawEllipse(pm.rect().adjusted(10, 10, -10, -10))
-    if color == theme.ERR:  # recording: inner white dot
-        p.setBrush(QColor("#ffffff"))
-        p.drawEllipse(pm.rect().adjusted(24, 24, -24, -24))
-    p.end()
-    return QIcon(pm)
+from ghostrec.ui import branding
 
 
 class TrayIcon(QSystemTrayIcon):
     def __init__(self, window, on_stop, on_quit):
         super().__init__(window)
         self._window = window
-        self._icon_idle = _dot_icon(theme.IDLE)
-        self._icon_rec = _dot_icon(theme.ERR)
+        self._icon_idle: QIcon = branding.tray_icon(False)
+        self._icon_rec: QIcon = branding.tray_icon(True)
         self._recording = False
 
         menu = QMenu()

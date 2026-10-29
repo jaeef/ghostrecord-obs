@@ -38,8 +38,10 @@ class PreviewWorker(threading.Thread):
         fails = 0
         while not self._stop_event.is_set():
             try:
+                # 720x405 is ~2x what the preview label renders at, so frames
+                # look sharp without wasting bandwidth on a huge JPEG
                 resp = req.get_source_screenshot(self._scene, "jpg",
-                                                 480, 270, 70)
+                                                 720, 405, 80)
                 data = getattr(resp, "image_data", "") or ""
                 if data:
                     if data.startswith("data:"):

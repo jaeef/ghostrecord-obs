@@ -6,7 +6,7 @@ from PyQt6.QtCore import QCoreApplication
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import QApplication
 
-from ghostrec.ui import theme
+from ghostrec.ui import branding, theme
 from ghostrec.ui.main_window import MainWindow
 
 _SINGLE_KEY = "ghostrec-obs-single-instance"
@@ -17,6 +17,8 @@ def main():
     QCoreApplication.setOrganizationName("GhostRec")
 
     app = QApplication(sys.argv)
+    app.setApplicationDisplayName("GhostRec OBS")
+    app.setWindowIcon(branding.app_icon())
     theme.apply(app)
 
     if _forward_to_existing_instance():

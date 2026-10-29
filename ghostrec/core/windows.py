@@ -59,7 +59,7 @@ def list_windows():
         _, pid = win32process.GetWindowThreadProcessId(hwnd)
         exe, exe_path = _exe_info_for_pid(pid)
         out.append({"hwnd": hwnd, "title": title, "cls": cls,
-                    "exe": exe, "exe_path": exe_path})
+                    "exe": exe, "exe_path": exe_path, "pid": pid})
 
     win32gui.EnumWindows(cb, None)
     return out
@@ -77,7 +77,7 @@ def get_window_info(hwnd):
     _, pid = win32process.GetWindowThreadProcessId(hwnd)
     exe, exe_path = _exe_info_for_pid(pid)
     return {"hwnd": hwnd, "title": title, "cls": cls,
-            "exe": exe, "exe_path": exe_path}
+            "exe": exe, "exe_path": exe_path, "pid": pid}
 
 
 def is_window_alive(hwnd):
@@ -107,3 +107,47 @@ def find_window_by_title(target):
         if target_lower in w["title"].lower():
             return w
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Z-order control (keeps the recorded window unoccluded -> sharp capture)      #
+# --------------------------------------------------------------------------- #
+
+def is_window_covered(hwnd):
+    """True when another (foreground) window overlaps the target window.
+
+    A fully covered window is "occluded" by Windows: the app stops producing new
+    frames, so a capture of it can go soft or freeze until it is visible again.
+    Heuristic: the foreground window is not us and its rectangle overlaps ours.
+    """
+    try:
+        fg = ctypes.windll.user32.GetForegroundWindow()
+        if not fg or fg == hwnd:
+            return False
+        a = win32gui.GetWindowRect(hwnd)
+        b = win32gui.GetWindowRect(fg)
+    except Exception:
+        return False
+    return (a[0] < b[2] and b[0] < a[2]
+            and a[1] < b[3] and b[1] < a[3])
+
+
+# --------------------------------------------------------------------------- #
+# Z-order (READ-ONLY)                                                                           #
+# --------------------------------------------------------------------------- #
+# GhostRec never raises windows above your work: pinning the recorded
+# window was removed at the user's request because it blocked normal use
+# of the desktop. Only a read-only check is kept, so the app can tell if
+# a window was pinned by the user themselves.
+GWL_EXSTYLE = -20
+WS_EX_TOPMOST = 0x00000008
+
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+_user32.GetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+_user32.GetWindowLongPtrW.restype = ctypes.c_longlong
+
+
+def is_window_on_top(hwnd):
+    """Read-only: True when the window carries the TOPMOST flag."""
+    style = int(_user32.GetWindowLongPtrW(ctypes.c_void_p(hwnd), GWL_EXSTYLE))
+    return bool(style & WS_EX_TOPMOST)

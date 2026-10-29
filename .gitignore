@@ -1,9 +1,27 @@
 __pycache__/
+*.py[cod]
 .claude/
+
+# user data
 config.json
 recordings/
-*.png
 run_log.txt
 run_err.txt
+
+# docs kept local
 FUTURE.md
 ghostrec-desktop-app.md
+
+# generated images, except tracked app assets
+*.png
+!ghostrec/ui/assets/*.png
+
+# build / packaging / tooling
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

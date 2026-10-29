@@ -20,6 +20,17 @@ DEFAULT_CONFIG = {
     "capture_source_name": "ClassCapture",
     "output_folder": "./recordings",
     "poll_seconds": 3,
+    "capture": {
+        # 0 = Automatic (OBS picks), 1 = BitBlt, 2 = Windows Graphics Capture
+        "method": 2,
+        # source kind: "window" = Window Capture (WGC/BitBlt),
+        #              "game"  = Game Capture (renders offscreen -> stays sharp
+        #                        even when the window is fully covered)
+        "source": "window",
+        # auto-detect apps that stop rendering when covered (Chrome etc.) and
+        # offer the recording-friendly launcher instead of nagging
+        "auto": True,
+    },
     "audio": {
         "check": True,
         "input_name": "Desktop Audio",
@@ -61,6 +72,12 @@ def validate_config(cfg):
     cfg.setdefault("capture_scene_name", "ClassRecScene")
     cfg.setdefault("capture_source_name", "ClassCapture")
     cfg.setdefault("poll_seconds", 3)
+    capture = cfg.setdefault("capture", {})
+    capture.setdefault("method", 2)
+    capture.setdefault("source", "window")
+    capture.setdefault("auto", True)
+    # removed feature: windows are never pinned above the user's work
+    capture.pop("keep_on_top", None)
     audio = cfg.setdefault("audio", {})
     audio.setdefault("check", True)
     audio.setdefault("input_name", "Desktop Audio")

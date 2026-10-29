@@ -9,7 +9,7 @@ import queue
 import threading
 
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QListWidget,
+from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QListWidget,
                              QListWidgetItem, QMainWindow, QMessageBox,
                              QPushButton, QStackedWidget, QSystemTrayIcon,
                              QVBoxLayout, QWidget)
@@ -18,6 +18,7 @@ from ghostrec.core import config as gcfg
 from ghostrec.core.obs import (AudioWatcher, ObsError, connect, launch_obs,
                                test_connection, wait_for_port)
 from ghostrec.core.recorder import RecorderSession
+from ghostrec.ui import branding
 from ghostrec.ui.pages.library import LibraryPage
 from ghostrec.ui.pages.live import LivePage
 from ghostrec.ui.pages.picker import PickerPage
@@ -33,6 +34,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GhostRec OBS")
+        self.setWindowIcon(branding.app_icon())
         self.resize(1000, 660)
 
         self.cfg = gcfg.validate_config(gcfg.load_config())
@@ -65,20 +67,59 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
+        # Left sidebar container
+        sidebar_box = QVBoxLayout()
+        sidebar_box.setContentsMargins(0, 0, 0, 0)
+        sidebar_box.setSpacing(0)
+
+        brand_widget = QWidget()
+        brand_widget.setStyleSheet("background: #090a0f; border-right: 1px solid #1a1d2b; padding: 18px 16px 12px 16px;")
+        brand_lay = QVBoxLayout(brand_widget)
+        brand_lay.setContentsMargins(0, 0, 0, 0)
+        brand_lay.setSpacing(2)
+
+        brand_row = QHBoxLayout()
+        brand_row.setContentsMargins(0, 0, 0, 0)
+        brand_row.setSpacing(10)
+        brand_logo = QLabel()
+        brand_logo.setPixmap(branding.logo_pixmap(30))
+        brand_logo.setFixedSize(30, 30)
+        brand_logo.setStyleSheet("background: transparent;")
+        brand_logo.setToolTip("GhostRec OBS")
+
+        brand_text = QVBoxLayout()
+        brand_text.setContentsMargins(0, 0, 0, 0)
+        brand_text.setSpacing(1)
+        brand_lbl = QLabel("GhostRec")
+        brand_lbl.setStyleSheet("font-size: 16px; font-weight: 800; color: #ffffff; letter-spacing: -0.3px;")
+        sub_lbl = QLabel("Window Lock • OBS")
+        sub_lbl.setStyleSheet("font-size: 11px; color: #64748b; font-weight: 500;")
+        brand_text.addWidget(brand_lbl)
+        brand_text.addWidget(sub_lbl)
+
+        brand_row.addWidget(brand_logo)
+        brand_row.addLayout(brand_text)
+        brand_row.addStretch(1)
+        brand_lay.addLayout(brand_row)
+        sidebar_box.addWidget(brand_widget)
+
         self.nav = QListWidget()
         self.nav.setObjectName("sidebar")
-        self.nav.setFixedWidth(180)
+        self.nav.setFixedWidth(190)
         for label in ("🎬  Record", "●  Live", "📁  Library", "⚙  Settings"):
             self.nav.addItem(QListWidgetItem(label))
-        root.addWidget(self.nav)
+        sidebar_box.addWidget(self.nav, 1)
+        root.addLayout(sidebar_box)
 
         right = QVBoxLayout()
-        right.setContentsMargins(16, 12, 16, 12)
-        right.setSpacing(10)
+        right.setContentsMargins(20, 14, 20, 14)
+        right.setSpacing(12)
 
         header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 4)
         self.conn_pill = StatusPill("OBS offline", "err")
-        self.connect_btn = QPushButton("Connect")
+        self.connect_btn = QPushButton("Connect OBS")
+        self.connect_btn.setStyleSheet("padding: 5px 14px; font-size: 12px;")
         header.addWidget(self.conn_pill)
         header.addStretch(1)
         header.addWidget(self.connect_btn)

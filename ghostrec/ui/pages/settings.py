@@ -3,8 +3,8 @@
 import copy
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import (QCheckBox, QDoubleSpinBox, QFileDialog,
-                             QFormLayout, QGridLayout, QGroupBox, QHBoxLayout,
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
+                             QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
                              QLabel, QLineEdit, QPushButton, QSpinBox,
                              QVBoxLayout, QWidget)
 
@@ -44,8 +44,8 @@ class SettingsPage(QWidget):
         form.addRow("Password:", password_row)
 
         buttons = QHBoxLayout()
-        self.test_btn = QPushButton("Test connection")
-        self.launch_btn = QPushButton("Start OBS…")
+        self.test_btn = QPushButton("Test Connection")
+        self.launch_btn = QPushButton("1-Click Launch OBS (Minimized)")
         buttons.addWidget(self.test_btn)
         buttons.addWidget(self.launch_btn)
         buttons.addStretch(1)
@@ -56,6 +56,59 @@ class SettingsPage(QWidget):
         self.test_label.setWordWrap(True)
         form.addRow("", self.test_label)
         root.addWidget(obs_box)
+
+        # -- Scene & source ---------------------------------------------------
+        scene_box = QGroupBox("Scene & source configuration")
+        scene_form = QFormLayout(scene_box)
+        self.scene_edit = QLineEdit()
+        self.source_edit = QLineEdit()
+        scene_form.addRow("Scene name:", self.scene_edit)
+        scene_form.addRow("Capture source name:", self.source_edit)
+        scene_hint = QLabel("GhostRec creates a dedicated scene containing only "
+                            "the window capture source — your other scenes are "
+                            "never touched, and the full display is never captured.")
+        scene_hint.setObjectName("muted")
+        scene_hint.setWordWrap(True)
+        scene_form.addRow("", scene_hint)
+        root.addWidget(scene_box)
+
+        # -- Capture ---------------------------------------------------------------
+        cap_box = QGroupBox("Capture")
+        cap_form = QFormLayout(cap_box)
+        self.source_combo = QComboBox()
+        self.source_combo.addItem(
+            "Window Capture — records the window even when covered "
+            "(can blur while fully covered)", "window")
+        self.source_combo.addItem(
+            "Game Capture — renders offscreen: stays sharp while you work "
+            "in other apps", "game")
+        cap_form.addRow("Capture source:", self.source_combo)
+        self.method_combo = QComboBox()
+        self.method_combo.addItem("Automatic (OBS picks)", 0)
+        self.method_combo.addItem("BitBlt — sharpest, shows covered content", 1)
+        self.method_combo.addItem("Windows Graphics Capture — records covered windows",
+                                  2)
+        cap_form.addRow("Window method:", self.method_combo)
+        method_hint = QLabel("Method applies to Window Capture only. If the "
+                             "video goes blurry while another window covers "
+                             "the target, switch Capture source to Game "
+                             "Capture — it renders the app offscreen, so "
+                             "occlusion does not matter.")
+        method_hint.setObjectName("muted")
+        method_hint.setWordWrap(True)
+        cap_form.addRow("", method_hint)
+        self.auto_detect = QCheckBox(
+            "Auto-detect apps that stop rendering when covered (Chrome, Teams…)")
+        cap_form.addRow(self.auto_detect)
+        auto_hint = QLabel("When you record an app that freezes itself while "
+                           "covered, GhostRec checks whether it was started "
+                           "with the anti-throttle flags and offers the "
+                           "recording-friendly launcher — and stays quiet when "
+                           "the target is already safe.")
+        auto_hint.setObjectName("muted")
+        auto_hint.setWordWrap(True)
+        cap_form.addRow("", auto_hint)
+        root.addWidget(cap_box)
 
         # -- Output ----------------------------------------------------------
         out_box = QGroupBox("Output")
@@ -123,6 +176,14 @@ class SettingsPage(QWidget):
         self.host_edit.setText(obs.get("host", "127.0.0.1"))
         self.port_spin.setValue(int(obs.get("port", 4455)))
         self.pwd_edit.setText(obs.get("password", ""))
+        self.scene_edit.setText(cfg.get("capture_scene_name", "ClassRecScene"))
+        self.source_edit.setText(cfg.get("capture_source_name", "ClassCapture"))
+        capture = cfg.get("capture", {})
+        idx = self.source_combo.findData(capture.get("source", "window"))
+        self.source_combo.setCurrentIndex(max(0, idx))
+        idx = self.method_combo.findData(int(capture.get("method", 2)))
+        self.method_combo.setCurrentIndex(max(0, idx))
+        self.auto_detect.setChecked(bool(capture.get("auto", True)))
         self.folder_edit.setText(cfg.get("output_folder", "./recordings"))
         self.poll_spin.setValue(int(cfg.get("poll_seconds", 3)))
         self.audio_check.setChecked(bool(audio.get("check", True)))
@@ -139,7 +200,15 @@ class SettingsPage(QWidget):
         cfg["obs"]["host"] = self.host_edit.text().strip() or "127.0.0.1"
         cfg["obs"]["port"] = int(self.port_spin.value())
         cfg["obs"]["password"] = self.pwd_edit.text()
+        cfg["capture_scene_name"] = (self.scene_edit.text().strip()
+                                     or "ClassRecScene")
+        cfg["capture_source_name"] = (self.source_edit.text().strip()
+                                      or "ClassCapture")
         cfg["output_folder"] = self.folder_edit.text().strip() or "./recordings"
+        capture = cfg.setdefault("capture", {})
+        capture["source"] = self.source_combo.currentData()
+        capture["method"] = int(self.method_combo.currentData())
+        capture["auto"] = bool(self.auto_detect.isChecked())
         cfg["poll_seconds"] = int(self.poll_spin.value())
         audio = cfg.setdefault("audio", {})
         audio["check"] = bool(self.audio_check.isChecked())

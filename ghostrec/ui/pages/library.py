@@ -31,8 +31,9 @@ class LibraryPage(QWidget):
         self.folder_label.setObjectName("muted")
         lay.addWidget(self.folder_label)
 
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Name", "Recorded", "Size"])
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Name", "Recorded", "Size",
+                                               "Format"])
         self.table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(
@@ -41,8 +42,9 @@ class LibraryPage(QWidget):
         self.table.verticalHeader().setVisible(False)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        for col in (1, 2, 3):
+            header.setSectionResizeMode(col,
+                                        QHeaderView.ResizeMode.ResizeToContents)
         self.table.itemDoubleClicked.connect(lambda *_: self._open())
         self.table.itemSelectionChanged.connect(self._update_details)
         lay.addWidget(self.table, 1)
@@ -56,16 +58,17 @@ class LibraryPage(QWidget):
         self.details.setObjectName("details")
         self.details.setTextFormat(Qt.TextFormat.RichText)
         self.details.setWordWrap(True)
-        self.details.setMinimumHeight(100)
+        self.details.setMinimumHeight(84)
         self.details.setAlignment(Qt.AlignmentFlag.AlignLeft
                                   | Qt.AlignmentFlag.AlignTop)
         lay.addWidget(self.details)
 
         btns = QHBoxLayout()
         self.refresh_btn = QPushButton("↻ Refresh")
-        self.open_btn = QPushButton("Open")
-        self.folder_btn = QPushButton("Show in folder")
-        self.delete_btn = QPushButton("Delete")
+        self.refresh_btn.setObjectName("accent")
+        self.open_btn = QPushButton("▶ Play")
+        self.folder_btn = QPushButton("📂 Show in Explorer")
+        self.delete_btn = QPushButton("🗑 Delete")
         btns.addWidget(self.refresh_btn)
         btns.addStretch(1)
         btns.addWidget(self.open_btn)
@@ -118,6 +121,8 @@ class LibraryPage(QWidget):
             self.table.setItem(row, 0, name_item)
             self.table.setItem(row, 1, QTableWidgetItem(rec.display_date))
             self.table.setItem(row, 2, QTableWidgetItem(human_size(rec.size_bytes)))
+            self.table.setItem(row, 3, QTableWidgetItem(
+                (rec.ext or "").lstrip(".").upper() or "—"))
         self.empty_label.setVisible(not self._rows)
         if prev:
             self.select_path(prev)

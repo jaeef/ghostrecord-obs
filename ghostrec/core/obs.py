@@ -107,19 +107,34 @@ def launch_obs():
 # Scene / source setup                                                         #
 # --------------------------------------------------------------------------- #
 
-def ensure_scene_and_source(req, scene_name, source_name, log=None):
-    """Make a DEDICATED scene that contains ONLY the window-capture source.
+def source_kind_name(kind):
+    """'window' | 'game' -> OBS input kind."""
+    return "game_capture" if kind == "game" else "window_capture"
+
+
+def ensure_scene_and_source(req, scene_name, source_name, log=None,
+                            method=2, kind="window"):
+    """Make a DEDICATED scene that contains ONLY the capture source.
 
     Recording captures whatever scene is on Program. If we recorded your normal
     scene it would also grab any Display/Screen Capture sitting in it (= your
     whole screen). So we use our own scene with just the one window in it —
     nothing else you do on screen is recorded.
+
+    ``kind``:
+      "window" -> window_capture. ``method``: 0 = automatic, 1 = BitBlt (sharp
+                  but shows occluding content), 2 = Windows Graphics Capture
+                  (captures covered windows; can look soft while fully covered
+                  because Windows stops rendering occluded windows).
+      "game"   -> game_capture. Renders the app offscreen, so it stays sharp
+                  even when the window is completely covered by other apps.
     """
 
     def _log(msg):
         if log:
             log("obs", msg)
 
+    want_kind = source_kind_name(kind)
     scenes = [s["sceneName"] for s in req.get_scene_list().scenes]
     if scene_name not in scenes:
         _log(f"creating dedicated scene '{scene_name}'")
@@ -135,17 +150,26 @@ def ensure_scene_and_source(req, scene_name, source_name, log=None):
 
     # OBS input names are GLOBAL. If the source exists (e.g. left in another
     # scene from a previous run) we add it to this scene instead of recreating.
-    existing = [i["inputName"] for i in req.get_input_list().inputs]
+    existing = {i["inputName"]: i.get("inputKind", "")
+                for i in req.get_input_list().inputs}
+    if source_name in existing:
+        if existing[source_name] and existing[source_name] != want_kind:
+            # capture kind changed -> old input can never be re-pointed
+            _log(f"recreating '{source_name}' as {want_kind}")
+            try:
+                req.remove_input(source_name)
+            except Exception:
+                pass
+            existing.pop(source_name, None)
     if source_name in existing:
         _log(f"adding existing source '{source_name}' to '{scene_name}'")
         req.create_scene_item(scene_name, source_name, True)
     else:
         _log(f"creating source '{source_name}' in '{scene_name}'")
-        req.create_input(
-            scene_name, source_name, "window_capture",
-            {"method": 2, "cursor": True},  # method 2 = Windows Graphics Capture
-            True,
-        )
+        settings = ({"capture_mode": "window", "capture_cursor": True}
+                    if want_kind == "game_capture"
+                    else {"method": int(method), "cursor": True})
+        req.create_input(scene_name, source_name, want_kind, settings, True)
     return scene_name
 
 
@@ -166,21 +190,23 @@ def fit_source_to_canvas(req, scene_name, source_name, log=None):
             log("obs", f"fit-to-canvas skipped: {e}")
 
 
-def point_source_at(req, source_name, window):
-    """Aim the window_capture source at ONE exact window — never anything else.
+def point_source_at(req, source_name, window, method=2, kind="window"):
+    """Aim the capture source at ONE exact window — never anything else.
 
-    We always pass the full 'title:class:exe' of the selected window and use
-    priority 0 (match by window title). The caller re-points the source whenever
-    the pinned window's title changes, so OBS can only ever bind to the window
-    we selected — never to another window of the same program.
+    We always pass the full 'title:class:exe' of the selected window, so OBS can
+    only ever bind to the window we selected — never to another window of the
+    same program. The caller re-points the source whenever the pinned window's
+    title changes.
     """
     from ghostrec.core.windows import obs_window_value
-    req.set_input_settings(
-        source_name,
-        {"window": obs_window_value(window), "priority": 0,
-         "method": 2, "cursor": True},
-        True,
-    )
+    value = obs_window_value(window)
+    if source_kind_name(kind) == "game_capture":
+        settings = {"capture_mode": "window", "window": value,
+                    "capture_cursor": True}
+    else:
+        settings = {"window": value, "priority": 0,
+                    "method": int(method), "cursor": True}
+    req.set_input_settings(source_name, settings, True)
 
 
 def check_scene_safety(req, scene_name):

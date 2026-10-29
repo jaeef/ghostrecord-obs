@@ -61,6 +61,26 @@ def scan_recordings(output_folder):
     return out
 
 
+def unique_recording_name(output_folder, name):
+    """Return `name`, or the first free `name_2`, `name_3`, ... variant.
+
+    Recordings are stored as '<name>_YYYY-MM-DD_HH-MM-SS.<ext>', so any file
+    starting with '<name>_' counts as a clash.
+    """
+    if not output_folder or not os.path.isdir(output_folder):
+        return name
+    try:
+        existing = os.listdir(output_folder)
+    except OSError:
+        return name
+    if not any(f.startswith(name + "_") for f in existing):
+        return name
+    n = 2
+    while any(f.startswith(f"{name}_{n}_") for f in existing):
+        n += 1
+    return f"{name}_{n}"
+
+
 def human_size(n):
     """'93.9 MB' style size string."""
     step = 1024.0
