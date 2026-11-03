@@ -49,6 +49,7 @@ THROTTLE_PRONE = {
 DEDICATED_PROFILE = os.path.join(
     os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(),
     "GhostRecChromeProfile")
+_command_line_cache = {}
 
 
 def find_chrome():
@@ -77,14 +78,20 @@ def process_command_line(pid):
     """Full command line of a process, or '' when unavailable."""
     if not pid or int(pid) <= 0:
         return ""
+    pid = int(pid)
+    if pid in _command_line_cache:
+        return _command_line_cache[pid]
     ps = ("(Get-CimInstance Win32_Process -Filter 'ProcessId=%d').CommandLine"
-          % int(pid))
+          % pid)
     try:
         out = subprocess.check_output(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
             text=True, stderr=subprocess.DEVNULL, timeout=8)
-        return out.strip()
+        value = out.strip()
+        _command_line_cache[pid] = value
+        return value
     except Exception:
+        _command_line_cache[pid] = ""
         return ""
 
 

@@ -4,7 +4,7 @@ import sys
 
 from PyQt6.QtCore import QCoreApplication
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from ghostrec.ui import branding, theme
 from ghostrec.ui.main_window import MainWindow
@@ -28,7 +28,14 @@ def main():
     QLocalServer.removeServer(_SINGLE_KEY)
     server.listen(_SINGLE_KEY)
 
-    window = MainWindow()
+    try:
+        window = MainWindow()
+    except (OSError, ValueError) as e:
+        QMessageBox.critical(
+            None, "GhostRec could not start",
+            f"Configuration error:\n\n{e}\n\n"
+            "Fix config.json or use Settings after recreating it.")
+        return 1
 
     def _on_new_connection():
         while server.hasPendingConnections():

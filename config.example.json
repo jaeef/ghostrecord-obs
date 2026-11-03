@@ -8,6 +8,12 @@
   "capture_source_name": "ClassCapture",
   "output_folder": "./recordings",
   "poll_seconds": 3,
+  "capture": {
+    "method": 2,
+    "source": "window",
+    "covered": true,
+    "auto": true
+  },
   "audio": {
     "check": true,
     "input_name": "Desktop Audio",

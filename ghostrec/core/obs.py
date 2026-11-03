@@ -13,12 +13,48 @@ import socket
 import subprocess
 import threading
 import time
+import ctypes
 
 import obsws_python as obsws
 
 
 class ObsError(Exception):
     """Human-readable OBS connection/operation error."""
+
+
+class RecordingLock:
+    """Cross-process Windows mutex for GhostRec's single-recording rule."""
+
+    _NAME = "Local\\GhostRecOBSRecording"
+
+    def __init__(self):
+        self._handle = None
+        self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._kernel32.CreateMutexW.argtypes = [
+            ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
+        self._kernel32.CreateMutexW.restype = ctypes.c_void_p
+        self._kernel32.ReleaseMutex.argtypes = [ctypes.c_void_p]
+        self._kernel32.ReleaseMutex.restype = ctypes.c_bool
+        self._kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        self._kernel32.CloseHandle.restype = ctypes.c_bool
+
+    def acquire(self):
+        """Acquire the named mutex; return False if another owner has it."""
+        ctypes.set_last_error(0)
+        handle = self._kernel32.CreateMutexW(None, True, self._NAME)
+        if not handle:
+            raise OSError(ctypes.get_last_error(), "could not create recording lock")
+        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+            self._kernel32.CloseHandle(handle)
+            return False
+        self._handle = handle
+        return True
+
+    def release(self):
+        if self._handle:
+            self._kernel32.ReleaseMutex(self._handle)
+            self._kernel32.CloseHandle(self._handle)
+            self._handle = None
 
 
 def _friendly_connect_error(e, host, port):
@@ -47,12 +83,21 @@ def connect(cfg, timeout=5):
 
 def test_connection(host, port, password, timeout=4):
     """Try to connect; returns the OBS version string or raises ObsError."""
+    req = None
     try:
         req = obsws.ReqClient(host=host, port=int(port), password=password,
                               timeout=timeout)
         return req.get_version().obs_version
     except Exception as e:
         raise ObsError(_friendly_connect_error(e, host, port)) from e
+    finally:
+        if req:
+            disconnect = getattr(req, "disconnect", None)
+            if disconnect:
+                try:
+                    disconnect()
+                except Exception:
+                    pass
 
 
 # --------------------------------------------------------------------------- #
@@ -63,6 +108,8 @@ OBS_PATHS = [
     r"C:\Program Files\obs-studio\bin\64bit\obs64.exe",
     r"C:\Program Files (x86)\obs-studio\bin\64bit\obs64.exe",
 ]
+
+WINDOW_CAPTURE_WGC = 2
 
 
 def is_obs_running():
@@ -109,7 +156,22 @@ def launch_obs():
 
 def source_kind_name(kind):
     """'window' | 'game' -> OBS input kind."""
-    return "game_capture" if kind == "game" else "window_capture"
+    if kind == "window":
+        return "window_capture"
+    if kind == "game":
+        return "game_capture"
+    raise ValueError(f"unsupported capture source: {kind!r}")
+
+
+def capture_method_for(kind, method, covered=True):
+    """Choose the OBS window method for the configured capture contract."""
+    selected = int(method)
+    if kind == "window" and covered:
+        # BitBlt can read whatever is visibly painted on the desktop. It cannot
+        # guarantee that a browser placed above the target stays out of the
+        # recording, so covered-window mode always uses Modern WGC.
+        return WINDOW_CAPTURE_WGC
+    return selected
 
 
 def ensure_scene_and_source(req, scene_name, source_name, log=None,
@@ -140,35 +202,47 @@ def ensure_scene_and_source(req, scene_name, source_name, log=None,
         _log(f"creating dedicated scene '{scene_name}'")
         req.create_scene(scene_name)
 
-    # Remove all existing items from the scene to keep it clean
+    # Never delete arbitrary user scene items. A configured scene must be empty,
+    # or already contain exactly the configured GhostRec source.
     items = req.get_scene_item_list(scene_name).scene_items
-    for item in items:
-        try:
-            req.remove_scene_item(scene_name, item["sceneItemId"])
-        except Exception:
-            pass
+    if items and not (len(items) == 1
+                      and items[0].get("sourceName") == source_name):
+        names = [item.get("sourceName", "?") for item in items]
+        raise ObsError(
+            f"dedicated scene '{scene_name}' contains other sources: {names}; "
+            "clear it or choose another scene name")
 
     # OBS input names are GLOBAL. If the source exists (e.g. left in another
-    # scene from a previous run) we add it to this scene instead of recreating.
+    # scene from a previous run), do not repoint it behind the owner's back.
     existing = {i["inputName"]: i.get("inputKind", "")
                 for i in req.get_input_list().inputs}
     if source_name in existing:
         if existing[source_name] and existing[source_name] != want_kind:
-            # capture kind changed -> old input can never be re-pointed
-            _log(f"recreating '{source_name}' as {want_kind}")
-            try:
-                req.remove_input(source_name)
-            except Exception:
-                pass
-            existing.pop(source_name, None)
+            raise ObsError(
+                f"source '{source_name}' already exists as "
+                f"'{existing[source_name]}'; choose another source name")
+
+        for other_scene in scenes:
+            if other_scene == scene_name:
+                continue
+            other_items = req.get_scene_item_list(other_scene).scene_items
+            if any(item.get("sourceName") == source_name
+                   for item in other_items):
+                raise ObsError(
+                    f"source '{source_name}' is used by OBS scene "
+                    f"'{other_scene}'; choose another source name")
+
     if source_name in existing:
-        _log(f"adding existing source '{source_name}' to '{scene_name}'")
-        req.create_scene_item(scene_name, source_name, True)
+        if not items:
+            _log(f"adding existing source '{source_name}' to '{scene_name}'")
+            req.create_scene_item(scene_name, source_name, True)
     else:
         _log(f"creating source '{source_name}' in '{scene_name}'")
-        settings = ({"capture_mode": "window", "capture_cursor": True}
+        settings = ({"capture_mode": "window", "capture_cursor": True,
+                     "priority": 0}
                     if want_kind == "game_capture"
-                    else {"method": int(method), "cursor": True})
+                    else {"method": int(method), "cursor": True,
+                          "client_area": True})
         req.create_input(scene_name, source_name, want_kind, settings, True)
     return scene_name
 
@@ -202,29 +276,57 @@ def point_source_at(req, source_name, window, method=2, kind="window"):
     value = obs_window_value(window)
     if source_kind_name(kind) == "game_capture":
         settings = {"capture_mode": "window", "window": value,
-                    "capture_cursor": True}
+                    "capture_cursor": True, "priority": 0}
     else:
         settings = {"window": value, "priority": 0,
-                    "method": int(method), "cursor": True}
+                    "method": int(method), "cursor": True,
+                    # Client-area WGC avoids recording the outer frame while
+                    # still reading the compositor surface when covered.
+                    "client_area": True}
     req.set_input_settings(source_name, settings, True)
 
 
-def check_scene_safety(req, scene_name):
+def check_scene_safety(req, scene_name, source_name=None, window=None,
+                       kind="window"):
     """Verify the program scene is clean before recording.
 
     Returns (ok, reason). ok=False means we must NOT start recording,
     otherwise the whole screen could be captured.
     """
+    try:
+        expected_kind = source_kind_name(kind)
+    except ValueError as e:
+        return False, str(e)
     cur = req.get_scene_list().current_program_scene_name
     items = req.get_scene_item_list(scene_name).scene_items
-    kinds = [i.get("inputKind", "") for i in items]
-    bad = [k for k in kinds if "monitor_capture" in k or "display" in k
-           or "game_capture" in k]
-    if cur != scene_name or bad or len(items) != 1:
+    if cur != scene_name or len(items) != 1:
         names = [i.get("sourceName", "?") for i in items]
         return (False,
                 f"scene not clean (program='{cur}', items={names}). "
                 f"Not recording — would capture whole screen.")
+
+    item = items[0]
+    item_name = item.get("sourceName") or item.get("inputName")
+    item_kind = item.get("inputKind", "")
+    if source_name and item_name != source_name:
+        return False, (f"scene item '{item_name}' is not GhostRec source "
+                       f"'{source_name}'")
+    if item_kind != expected_kind:
+        return False, (f"scene source '{item_name}' has kind '{item_kind}', "
+                       f"expected '{expected_kind}'")
+
+    if window is not None and source_name:
+        try:
+            settings_resp = req.get_input_settings(source_name)
+            settings = getattr(settings_resp, "input_settings", None)
+            if settings is None and isinstance(settings_resp, dict):
+                settings = settings_resp.get("inputSettings", {})
+            settings = settings or {}
+        except Exception as e:
+            return False, f"cannot verify capture target: {e}"
+        from ghostrec.core.windows import obs_window_value
+        if settings.get("window") != obs_window_value(window):
+            return False, "capture source no longer targets the selected window"
     return True, ""
 
 
@@ -252,31 +354,37 @@ def stop_and_finalize(req, timeout=30, log=None):
         return "", True
     src_path = getattr(res, "output_path", "") or ""
 
-    timed_out = True
+    output_inactive = False
     # 1) wait until OBS reports the recording output is no longer active
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         try:
             if not req.get_record_status().output_active:
-                timed_out = False
+                output_inactive = True
                 break
         except Exception:
             break
         time.sleep(0.5)
 
     # 2) wait until the file exists and its size is stable across two reads
+    file_stable = False
     last = -1
-    stable_deadline = time.time() + timeout
-    while time.time() < stable_deadline:
+    stable_deadline = time.monotonic() + timeout
+    while time.monotonic() < stable_deadline:
         if src_path and os.path.exists(src_path):
-            size = os.path.getsize(src_path)
+            try:
+                size = os.path.getsize(src_path)
+            except OSError:
+                size = -1
             if size == last and size > 0:
-                timed_out = False
+                file_stable = True
                 break
             last = size
         time.sleep(0.7)
+    timed_out = not (output_inactive and file_stable)
     if timed_out:
-        _log("WARNING: file finalization timed out; file may be incomplete.")
+        _log("WARNING: OBS/file finalization did not complete; file may be "
+             "incomplete.")
     return src_path, timed_out
 
 

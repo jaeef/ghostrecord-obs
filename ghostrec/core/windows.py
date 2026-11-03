@@ -80,6 +80,30 @@ def get_window_info(hwnd):
             "exe": exe, "exe_path": exe_path, "pid": pid}
 
 
+def same_window_identity(expected, current):
+    """Return whether two snapshots still identify the same native window.
+
+    Titles are intentionally excluded because title changes are part of the
+    recorder's normal re-lock behavior. HWND reuse, process changes, class
+    changes, or executable changes are not accepted.
+    """
+    if not expected or not current:
+        return False
+    if expected.get("hwnd") != current.get("hwnd"):
+        return False
+    if expected.get("pid") and current.get("pid") != expected.get("pid"):
+        return False
+    if expected.get("cls") and current.get("cls") != expected.get("cls"):
+        return False
+    if expected.get("exe") and current.get("exe"):
+        if current["exe"].lower() != expected["exe"].lower():
+            return False
+    if expected.get("exe_path") and current.get("exe_path"):
+        if current["exe_path"].lower() != expected["exe_path"].lower():
+            return False
+    return True
+
+
 def is_window_alive(hwnd):
     """True while the window handle still exists."""
     return bool(win32gui.IsWindow(hwnd))

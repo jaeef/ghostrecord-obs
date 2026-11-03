@@ -2,6 +2,7 @@ import os
 import json
 import sys
 import subprocess
+import socket
 import time
 from pathlib import Path
 
@@ -31,14 +32,10 @@ def is_obs_running():
         return False
 
 def is_port_listening(port):
+    """Check the configured local TCP endpoint without shell pipelines."""
     try:
-        output = subprocess.check_output(
-            ["netstat", "-ano", "|", "findstr", f":{port}"],
-            shell=True,
-            text=True,
-            stderr=subprocess.DEVNULL
-        )
-        return "LISTENING" in output
+        with socket.create_connection(("127.0.0.1", int(port)), timeout=0.4):
+            return True
     except:
         return False
 
@@ -69,7 +66,8 @@ def ensure_obs_running():
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-            port = cfg.get("obs", {}).get("port", 4455)
+            obs_cfg = cfg.get("obs", {}) if isinstance(cfg, dict) else {}
+            port = obs_cfg.get("port", 4455) if isinstance(obs_cfg, dict) else 4455
         except Exception:
             pass
     if is_obs_running() and is_port_listening(port):
@@ -127,21 +125,38 @@ def get_password():
     pwd = input("\nEnter OBS WebSocket password: ").strip()
     return pwd
 
-def create_config(password):
-    config = {
-        "obs": {"host": "127.0.0.1", "port": 4455, "password": password},
-        "capture_scene_name": "ClassRecScene",
-        "capture_source_name": "ClassCapture",
-        "output_folder": "./recordings",
-        "poll_seconds": 3,
-        "audio": {
-            "check": True,
-            "input_name": "Desktop Audio",
-            "silence_db": -55.0,
-            "silence_alert_seconds": 30,
-            "minimize_warn_seconds": 60
-        }
-    }
+def create_config(password, port=4455):
+    config = {}
+    if CONFIG_PATH.exists():
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                config = loaded
+        except (OSError, json.JSONDecodeError):
+            config = {}
+    if not isinstance(config.get("obs"), dict):
+        config["obs"] = {}
+    config["obs"].update({
+        "host": config["obs"].get("host", "127.0.0.1"),
+        "port": int(port),
+        "password": password,
+    })
+    config.setdefault("capture_scene_name", "ClassRecScene")
+    config.setdefault("capture_source_name", "ClassCapture")
+    config.setdefault("output_folder", "./recordings")
+    config.setdefault("poll_seconds", 3)
+    config.setdefault("capture", {})
+    config["capture"].setdefault("method", 2)
+    config["capture"].setdefault("source", "window")
+    config["capture"].setdefault("covered", True)
+    config["capture"].setdefault("auto", True)
+    config.setdefault("audio", {})
+    config["audio"].setdefault("check", True)
+    config["audio"].setdefault("input_name", "Desktop Audio")
+    config["audio"].setdefault("silence_db", -55.0)
+    config["audio"].setdefault("silence_alert_seconds", 30)
+    config["audio"].setdefault("minimize_warn_seconds", 60)
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2)
     print(f"[setup] Config saved to {CONFIG_PATH}")
@@ -149,6 +164,7 @@ def create_config(password):
 def test_connection(password, port=4455, retries=5):
     import time
     for attempt in range(1, retries+1):
+        req = None
         try:
             import obsws_python
             req = obsws_python.ReqClient(host="127.0.0.1", port=port, password=password, timeout=3)
@@ -168,6 +184,14 @@ def test_connection(password, port=4455, retries=5):
             else:
                 print(f"[ERROR] Connection failed: {e}")
                 return False
+        finally:
+            if req:
+                disconnect = getattr(req, "disconnect", None)
+                if disconnect:
+                    try:
+                        disconnect()
+                    except Exception:
+                        pass
     return False
 
 def main():
@@ -187,8 +211,13 @@ def main():
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-            pwd = cfg.get("obs", {}).get("password", "")
-            port = cfg.get("obs", {}).get("port", 4455)
+            obs_cfg = cfg.get("obs", {}) if isinstance(cfg, dict) else {}
+            if not isinstance(obs_cfg, dict):
+                obs_cfg = {}
+            pwd = obs_cfg.get("password", "")
+            port = obs_cfg.get("port", 4455)
+            if pwd == "YOUR_OBS_WEBSOCKET_PASSWORD":
+                pwd = ""
         except json.JSONDecodeError:
             print("[setup] config.json is corrupted. Recreating.")
             pwd = ""
@@ -208,7 +237,7 @@ def main():
             sys.exit(1)
     else:
         pwd = get_password()
-    create_config(pwd)
+    create_config(pwd, port)
     print("\n[step 3/3] Testing connection...")
     if test_connection(pwd, port):
         print("[OK] Setup complete. You can now run start_recorder.bat.")

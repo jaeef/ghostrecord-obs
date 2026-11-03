@@ -23,6 +23,10 @@ class SettingsPage(QWidget):
         title = QLabel("Settings")
         title.setObjectName("pageTitle")
         root.addWidget(title)
+        subtitle = QLabel(
+            "Configure OBS, covered-window capture, output, and monitoring.")
+        subtitle.setObjectName("pageSubtitle")
+        root.addWidget(subtitle)
 
         # -- OBS -------------------------------------------------------------
         obs_box = QGroupBox("OBS WebSocket")
@@ -44,8 +48,8 @@ class SettingsPage(QWidget):
         form.addRow("Password:", password_row)
 
         buttons = QHBoxLayout()
-        self.test_btn = QPushButton("Test Connection")
-        self.launch_btn = QPushButton("1-Click Launch OBS (Minimized)")
+        self.test_btn = QPushButton("Test connection")
+        self.launch_btn = QPushButton("Launch OBS")
         buttons.addWidget(self.test_btn)
         buttons.addWidget(self.launch_btn)
         buttons.addStretch(1)
@@ -77,34 +81,34 @@ class SettingsPage(QWidget):
         cap_form = QFormLayout(cap_box)
         self.source_combo = QComboBox()
         self.source_combo.addItem(
-            "Window Capture — records the window even when covered "
-            "(can blur while fully covered)", "window")
+            "Window Capture — Modern WGC for covered windows", "window")
         self.source_combo.addItem(
-            "Game Capture — renders offscreen: stays sharp while you work "
-            "in other apps", "game")
+            "Game Capture — only for apps with OBS game hooks", "game")
         cap_form.addRow("Capture source:", self.source_combo)
         self.method_combo = QComboBox()
-        self.method_combo.addItem("Automatic (OBS picks)", 0)
-        self.method_combo.addItem("BitBlt — sharpest, shows covered content", 1)
-        self.method_combo.addItem("Windows Graphics Capture — records covered windows",
-                                  2)
+        self.method_combo.addItem("Automatic (upgrade to WGC when covered)", 0)
+        self.method_combo.addItem("Legacy BitBlt (visible desktop only)", 1)
+        self.method_combo.addItem("Modern WGC (recommended)", 2)
         cap_form.addRow("Window method:", self.method_combo)
-        method_hint = QLabel("Method applies to Window Capture only. If the "
-                             "video goes blurry while another window covers "
-                             "the target, switch Capture source to Game "
-                             "Capture — it renders the app offscreen, so "
-                             "occlusion does not matter.")
+        self.covered_mode = QCheckBox(
+            "Protect the target when another window covers it (Modern WGC)")
+        cap_form.addRow(self.covered_mode)
+        method_hint = QLabel(
+            "Window Capture + Modern WGC reads the restored target surface even "
+            "when another app covers it. Minimized windows cannot be captured; "
+            "Chromium apps may also need anti-occlusion launch flags. When this "
+            "protection is enabled, GhostRec uses WGC even if Automatic or "
+            "BitBlt is selected.")
         method_hint.setObjectName("muted")
         method_hint.setWordWrap(True)
         cap_form.addRow("", method_hint)
         self.auto_detect = QCheckBox(
-            "Auto-detect apps that stop rendering when covered (Chrome, Teams…)")
+            "Detect apps that throttle their own rendering when covered")
         cap_form.addRow(self.auto_detect)
-        auto_hint = QLabel("When you record an app that freezes itself while "
-                           "covered, GhostRec checks whether it was started "
-                           "with the anti-throttle flags and offers the "
-                           "recording-friendly launcher — and stays quiet when "
-                           "the target is already safe.")
+        auto_hint = QLabel(
+            "GhostRec checks Chromium/Electron processes and offers a safe "
+            "launcher when the app itself pauses rendering. This is separate "
+            "from WGC, which handles the covered window surface.")
         auto_hint.setObjectName("muted")
         auto_hint.setWordWrap(True)
         cap_form.addRow("", auto_hint)
@@ -184,6 +188,7 @@ class SettingsPage(QWidget):
         idx = self.method_combo.findData(int(capture.get("method", 2)))
         self.method_combo.setCurrentIndex(max(0, idx))
         self.auto_detect.setChecked(bool(capture.get("auto", True)))
+        self.covered_mode.setChecked(bool(capture.get("covered", True)))
         self.folder_edit.setText(cfg.get("output_folder", "./recordings"))
         self.poll_spin.setValue(int(cfg.get("poll_seconds", 3)))
         self.audio_check.setChecked(bool(audio.get("check", True)))
@@ -208,6 +213,7 @@ class SettingsPage(QWidget):
         capture = cfg.setdefault("capture", {})
         capture["source"] = self.source_combo.currentData()
         capture["method"] = int(self.method_combo.currentData())
+        capture["covered"] = bool(self.covered_mode.isChecked())
         capture["auto"] = bool(self.auto_detect.isChecked())
         cfg["poll_seconds"] = int(self.poll_spin.value())
         audio = cfg.setdefault("audio", {})

@@ -35,7 +35,11 @@ def scan_recordings(output_folder):
     if not output_folder or not os.path.isdir(output_folder):
         return []
     out = []
-    for fname in os.listdir(output_folder):
+    try:
+        filenames = os.listdir(output_folder)
+    except OSError:
+        return []
+    for fname in filenames:
         path = os.path.join(output_folder, fname)
         if not os.path.isfile(path):
             continue
@@ -73,10 +77,12 @@ def unique_recording_name(output_folder, name):
         existing = os.listdir(output_folder)
     except OSError:
         return name
-    if not any(f.startswith(name + "_") for f in existing):
+    folded = os.path.normcase
+    if not any(folded(f).startswith(folded(name + "_")) for f in existing):
         return name
     n = 2
-    while any(f.startswith(f"{name}_{n}_") for f in existing):
+    while any(folded(f).startswith(folded(f"{name}_{n}_"))
+              for f in existing):
         n += 1
     return f"{name}_{n}"
 

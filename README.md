@@ -61,7 +61,7 @@ own work stay out of the video.
 | **HWND lock** | Pins the exact window by handle. Title changes re-lock the same window; other windows are never captured. |
 | **Dedicated scene** | Creates an OBS scene containing only the window capture source and the audio input — no manual OBS setup. |
 | **Stop on close** | Closing the recorded window finalizes and saves the file. Title changes never stop it. |
-| **Occlusion awareness** | Detects when the target is minimized or fully covered and warns you live, with a one-click capture-source switch. |
+| **Covered-window capture** | Uses Windows Graphics Capture (WGC) so a restored target remains isolated when another window is placed on top; warns when the target app itself throttles rendering. |
 | **Audio monitoring** | Silence detection with a threshold and timeout, plus a live level meter. |
 | **Recording library** | Browse, play, reveal and delete recordings, with date, size and duration details. |
 | **System tray** | Idle/recording tray icon, stop-from-tray, notifications, single-instance guard. |
@@ -190,6 +190,7 @@ The GUI's Settings page edits the same file.
   "capture": {
     "method": 2,
     "source": "window",
+    "covered": true,
     "auto": true
   },
   "audio": {
@@ -212,7 +213,8 @@ The GUI's Settings page edits the same file.
 | `output_folder` | `./recordings` | Where finished recordings go |
 | `poll_seconds` | `3` | Window/status poll interval |
 | `capture.method` | `2` | Window Capture method: `0` automatic, `1` BitBlt, `2` Windows Graphics Capture |
-| `capture.source` | `window` | `window` = Window Capture; `game` = Game Capture (renders offscreen, stays sharp when covered) |
+| `capture.source` | `window` | `window` = Window Capture; `game` = Game Capture for apps with OBS game hooks |
+| `capture.covered` | `true` | Force Modern WGC for Window Capture so another window can cover the restored target without entering the recording |
 | `capture.auto` | `true` | Detect apps that stop rendering when occluded and show the capture-source advice |
 | `audio.check` | `true` | Enable silence / minimization warnings |
 | `audio.input_name` | `Desktop Audio` | Audio input name in OBS |
@@ -262,7 +264,7 @@ password.
 | Symptom | Fix |
 |---------|-----|
 | Recording is black or empty (Intel iGPU) | Window Capture needs a GPU-disabled browser on these machines. Run `open_class_browser.bat` (Chrome with `--disable-gpu` and a separate profile), join in that window, then record it. Avoid the Teams desktop app. |
-| Video blurs or freezes when another window covers the target | Windows stops painting occluded windows. Switch the target to **Capture: Game** on the Live page (or `capture.source` → `game`); Game Capture renders offscreen. |
+| Another window covers the target | Keep the target restored, enable **Covered-window protection**, and use Window Capture + Modern WGC. GhostRec captures the target surface, not the topmost browser. If the target is Chrome/Edge/Electron and its own content stops updating, use the recording-safe browser launcher; capture cannot force an app to render frames it throttles itself. |
 | Recording freezes when the window is minimized | Restore the window. Minimized windows produce no frames — GhostRec warns after `audio.minimize_warn_seconds`. |
 | `Connection failed` | OBS WebSocket server must be enabled, port `4455`, password identical to `config.json`. Use **Test Connection** in Settings. |
 | File finalization timed out | OBS is still writing. Leave OBS open and check its own recording folder; large files take longer to close. |

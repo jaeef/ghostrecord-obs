@@ -64,11 +64,11 @@ class LibraryPage(QWidget):
         lay.addWidget(self.details)
 
         btns = QHBoxLayout()
-        self.refresh_btn = QPushButton("↻ Refresh")
+        self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.setObjectName("accent")
-        self.open_btn = QPushButton("▶ Play")
-        self.folder_btn = QPushButton("📂 Show in Explorer")
-        self.delete_btn = QPushButton("🗑 Delete")
+        self.open_btn = QPushButton("Play")
+        self.folder_btn = QPushButton("Show in folder")
+        self.delete_btn = QPushButton("Delete")
         btns.addWidget(self.refresh_btn)
         btns.addStretch(1)
         btns.addWidget(self.open_btn)
@@ -165,12 +165,18 @@ class LibraryPage(QWidget):
     def _open(self):
         path = self._selected_path()
         if path:
-            open_file(path)
+            try:
+                open_file(path)
+            except OSError as e:
+                QMessageBox.warning(self, "Open failed", str(e))
 
     def _show_folder(self):
         path = self._selected_path()
         if path:
-            show_in_explorer(path)
+            try:
+                show_in_explorer(path)
+            except OSError as e:
+                QMessageBox.warning(self, "Explorer failed", str(e))
 
     def _delete(self):
         path = self._selected_path()

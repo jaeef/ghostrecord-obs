@@ -12,8 +12,8 @@ from PyQt6.QtCore import (QEasingCurve, QPropertyAnimation, Qt, QTimer,
                           pyqtSignal)
 from PyQt6.QtGui import QBrush, QColor, QPixmap
 from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QListWidget,
-                             QListWidgetItem, QPushButton, QVBoxLayout,
-                             QWidget)
+                              QListWidgetItem, QMessageBox, QPushButton,
+                              QVBoxLayout, QWidget)
 
 from ghostrec.core.library import open_file, show_in_explorer
 from ghostrec.ui import theme
@@ -71,7 +71,8 @@ class LivePage(QWidget):
         self.target_meta = QLabel("PID —  •  HWND —")
         self.target_meta.setObjectName("mono")
         card_lay.addWidget(self.target_meta)
-        lock_note = QLabel("Locked by HWND — title changes are auto-tracked.")
+        lock_note = QLabel(
+            "Exact window lock · keep it restored and cover it freely.")
         lock_note.setObjectName("muted")
         card_lay.addWidget(lock_note)
         lay.addWidget(self.target_card)
@@ -88,12 +89,12 @@ class LivePage(QWidget):
         pills.addStretch(1)
         # quick fix: switch capture type without digging into Settings
         self.capture_combo = QComboBox()
-        self.capture_combo.addItem("Capture: Window", "window")
-        self.capture_combo.addItem("Capture: Game (sharp when covered)", "game")
+        self.capture_combo.addItem("Window · WGC covered mode", "window")
+        self.capture_combo.addItem("Game · supported apps", "game")
         self.capture_combo.setToolTip(
-            "Game Capture renders the app offscreen, so the recording stays "
-            "sharp even when other windows cover it. Applies to the next "
-            "recording.")
+            "Window + Modern WGC is the reliable default for a restored window "
+            "covered by another app. Game Capture is only for apps that support "
+            "OBS game hooks. Applies to the next recording.")
         pills.addWidget(self.capture_combo)
         lay.addLayout(pills)
         self.capture_combo.currentIndexChanged.connect(self._emit_capture_source)
@@ -117,16 +118,17 @@ class LivePage(QWidget):
         self.advice_label = QLabel("")
         self.advice_label.setWordWrap(True)
         self.advice_label.setObjectName("adviceText")
-        self.advice_btn = QPushButton("🌐 Relaunch my Chrome")
+        self.advice_btn = QPushButton("Prepare next Chrome capture")
         self.advice_btn.setObjectName("accent")
         self.advice_btn.setToolTip(
-            "Restart your own Chrome with anti-throttle flags.\n"
-            "Same profile, tabs restored, keeps drawing when covered.")
+            "Restart your own Chrome with anti-occlusion flags for the next "
+            "capture. Same profile, tabs restored.")
         self.advice_btn.clicked.connect(self.record_chrome_requested.emit)
-        self.advice_iso_btn = QPushButton("🧪 Isolated Chrome")
+        self.advice_iso_btn = QPushButton("Open isolated browser")
         self.advice_iso_btn.setObjectName("accent")
         self.advice_iso_btn.setToolTip(
-            "Open a separate Chrome instance (own profile) that never freezes.")
+            "Open a separate Chrome instance with its own recording-safe profile "
+            "for the next capture.")
         self.advice_iso_btn.clicked.connect(self.isolated_chrome_requested.emit)
         self.advice_dismiss = QPushButton("✕")
         self.advice_dismiss.setObjectName("accent")
@@ -159,9 +161,9 @@ class LivePage(QWidget):
         lay.addWidget(self.result_label)
 
         result_btns = QHBoxLayout()
-        self.open_file_btn = QPushButton("▶ Play")
-        self.open_folder_btn = QPushButton("📂 Show in Explorer")
-        self.back_btn = QPushButton("← Back to picker")
+        self.open_file_btn = QPushButton("Play recording")
+        self.open_folder_btn = QPushButton("Show in folder")
+        self.back_btn = QPushButton("Back to picker")
         self.open_file_btn.clicked.connect(self._open_file)
         self.open_folder_btn.clicked.connect(self._show_folder)
         self.back_btn.clicked.connect(self.back_requested.emit)
@@ -182,12 +184,12 @@ class LivePage(QWidget):
         # -- Actions ----------------------------------------------------------------
         controls = QHBoxLayout()
         controls.setSpacing(10)
-        self.stop_btn = QPushButton("■ Stop Recording & Save")
+        self.stop_btn = QPushButton("Stop & save")
         self.stop_btn.setObjectName("danger")
         self.stop_btn.setMinimumHeight(38)
         self.stop_btn.setEnabled(False)
         controls.addWidget(self.stop_btn)
-        self.library_btn = QPushButton("📁 View library")
+        self.library_btn = QPushButton("View library")
         self.library_btn.clicked.connect(self.library_requested.emit)
         controls.addWidget(self.library_btn)
         controls.addStretch(1)
@@ -228,13 +230,21 @@ class LivePage(QWidget):
         exe = (ev.get("exe") or "this app").lower()
         if exe == "chrome.exe":
             self.advice_label.setText(
-                "Chrome stops drawing when another window covers it, so the "
-                "recording freezes. Pick how to fix it (one click):")
+                "Chrome may throttle its own renderer when covered. WGC is "
+                "active, but this process needs safe launch flags. Prepare "
+                "Chrome for the next capture or use the isolated browser:")
         else:
             self.advice_label.setText(
                 f"{exe.replace('.exe', '')} stops drawing when another window "
                 f"covers it, so the recording freezes. Pick a fix:")
         self.advice_box.show()
+
+    def on_relocked(self, ev):
+        """Show a title change without treating it as a new target."""
+        title = ev.get("title", "")
+        if title:
+            self.target_title.setText(title)
+        self.add_feed("pin", f"re-locked same window — '{title}'")
 
     # -- events from the recorder session ------------------------------------ #
 
@@ -253,7 +263,8 @@ class LivePage(QWidget):
         for b in (self.open_file_btn, self.open_folder_btn):
             b.hide()
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setText("■ Stop Recording & Save")
+        self.stop_btn.setText("Stop & save")
+        self.capture_combo.setEnabled(False)
         self.timer_label.setText("00:00:00")
         self.meter.set_enabled(False)
         self.meter.set_db(-100.0)
@@ -271,7 +282,7 @@ class LivePage(QWidget):
         self._base_elapsed = 0.0
         self._base_time = time.time()
         self.stop_btn.setEnabled(True)
-        self.stop_btn.setText("■ Stop Recording & Save")
+        self.stop_btn.setText("Stop & save")
         self._set_target(ev.get("window_title", ""), ev.get("pid", 0),
                          ev.get("hwnd", 0))
         self.pill_output.set_state("rec", "output active")
@@ -289,8 +300,11 @@ class LivePage(QWidget):
             self.pill_min.set_state("warn", "minimized warning")
         else:
             self.pill_min.set_state("ok", "window OK")
-        if ev.get("covered"):
-            self.pill_cover.set_state("warn", "window covered — may blur")
+        if ev.get("covered") and ev.get("capture_method") == 2:
+            self.pill_cover.set_state("ok", "covered · WGC active")
+            self.pill_cover.show()
+        elif ev.get("covered"):
+            self.pill_cover.set_state("warn", "covered · legacy capture")
             self.pill_cover.show()
         else:
             self.pill_cover.hide()
@@ -305,7 +319,7 @@ class LivePage(QWidget):
         silent_for = float(ev.get("silent_for", 0.0))
         if audio_on and silent_for > self._silence_limit:
             self._show_silence(
-                f"🔇 No sound for {int(silent_for)}s "
+                f"No sound for {int(silent_for)}s "
                 f"(last {db:.1f} dB) — check mic / speaker output.")
         else:
             self._hide_silence()
@@ -318,8 +332,9 @@ class LivePage(QWidget):
 
     def on_stopped(self, ev):
         self._running = False
+        self.capture_combo.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setText("■ Stop Recording & Save")
+        self.stop_btn.setText("Stop & save")
         self._last_path = ev.get("final_path") or ""
         if ev.get("timed_out"):
             self.banner.setText("File finalization timed out — the recording "
@@ -336,14 +351,16 @@ class LivePage(QWidget):
 
     def on_aborted(self, reason):
         self._running = False
+        self.capture_combo.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.banner.setText(f"Recording aborted: {reason}")
         self.banner.show()
 
     def on_error(self, text):
         self._running = False
+        self.capture_combo.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setText("■ Stop Recording & Save")
+        self.stop_btn.setText("Stop & save")
         self.banner.setText(f"Error: {text}")
         self.banner.show()
 
@@ -435,8 +452,14 @@ class LivePage(QWidget):
 
     def _open_file(self):
         if self._last_path:
-            open_file(self._last_path)
+            try:
+                open_file(self._last_path)
+            except OSError as e:
+                QMessageBox.warning(self, "Open failed", str(e))
 
     def _show_folder(self):
         if self._last_path:
-            show_in_explorer(self._last_path)
+            try:
+                show_in_explorer(self._last_path)
+            except OSError as e:
+                QMessageBox.warning(self, "Explorer failed", str(e))

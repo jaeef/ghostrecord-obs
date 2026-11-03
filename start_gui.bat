@@ -23,15 +23,20 @@ if not defined PY (
 
 set "PYTHONUTF8=1"
 
-%PY% -c "import PyQt6" >nul 2>nul
+%PY% -c "import PyQt6, obsws_python, win32gui" >nul 2>nul
 if errorlevel 1 (
-    echo [i] Installing GUI dependency ^(PyQt6^)...
-    %PY% -m pip install "PyQt6>=6.6"
+    echo [i] Installing GhostRec dependencies...
+    %PY% -m pip install -r requirements.txt
     if errorlevel 1 (
-        echo [!] Failed to install PyQt6.
+        echo [!] Failed to install dependencies.
         pause
         exit /b 1
     )
+)
+
+if not exist config.json (
+    echo [i] Creating default config.json...
+    copy /y config.example.json config.json >nul
 )
 
 %PY% app.py

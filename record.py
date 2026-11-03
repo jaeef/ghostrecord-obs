@@ -30,6 +30,7 @@ Python packages in requirements.txt.
 """
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -37,6 +38,7 @@ import time
 import obsws_python as obsws
 
 from ghostrec.core import config as gcfg
+from ghostrec import __version__
 from ghostrec.core.obs import AudioWatcher, ObsError, connect, \
     ensure_scene_and_source
 from ghostrec.core.recorder import RecorderSession, sanitize_recording_name
@@ -240,14 +242,17 @@ def main():
             print(f"{w['exe']:<26} | {w['title']}")
         return
     if args.version:
-        print("GhostRec OBS v1.0.0")
+        print(f"GhostRec OBS v{__version__}")
         return
 
     msg = gcfg.ensure_config()  # Create default config if missing
     if msg:
         print(f"[config] {msg}")
-    cfg = gcfg.load_config()
-    cfg = gcfg.validate_config(cfg)
+    try:
+        cfg = gcfg.validate_config(gcfg.load_config())
+    except (OSError, ValueError, json.JSONDecodeError) as e:
+        print(f"[config] ERROR: {e}")
+        sys.exit(1)
     if not cfg.get("obs", {}).get("password"):
         pwd = prompt_password()
         if pwd:
@@ -272,11 +277,24 @@ def main():
     print(f"[obs] connected. OBS {ver.obs_version}, "
           f"ws {ver.obs_web_socket_version}")
 
-    ensure_scene_and_source(req, cfg["capture_scene_name"],
-                            cfg["capture_source_name"],
-                            log=lambda tag, text: print(f"[{tag}] {text}"),
-                            method=cfg.get("capture", {}).get("method", 2),
-                            kind=cfg.get("capture", {}).get("source", "window"))
+    def disconnect_req():
+        disconnect = getattr(req, "disconnect", None)
+        if disconnect:
+            try:
+                disconnect()
+            except Exception:
+                pass
+
+    try:
+        ensure_scene_and_source(
+            req, cfg["capture_scene_name"], cfg["capture_source_name"],
+            log=lambda tag, text: print(f"[{tag}] {text}"),
+            method=cfg.get("capture", {}).get("method", 2),
+            kind=cfg.get("capture", {}).get("source", "window"))
+    except (ObsError, obsws.error.OBSSDKError) as e:
+        print(f"[obs] ERROR: {e}")
+        disconnect_req()
+        sys.exit(1)
 
     audio = None
     if cfg["audio"].get("check"):
@@ -308,6 +326,7 @@ def main():
             print("[auto] Recording saved.")
         if audio:
             audio.stop()
+        disconnect_req()
         return
 
     try:
@@ -334,6 +353,7 @@ def main():
     finally:
         if audio:
             audio.stop()
+        disconnect_req()
 
 
 if __name__ == "__main__":

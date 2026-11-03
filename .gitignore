@@ -11,6 +11,10 @@ run_err.txt
 # docs kept local
 FUTURE.md
 ghostrec-desktop-app.md
+workngtree.md
+
+# local test scratch, not tracked
+tests/
 
 # generated images, except tracked app assets
 *.png

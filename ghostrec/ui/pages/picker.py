@@ -1,4 +1,6 @@
-"""Window picker page: rich window card list + recording name + Start (No search)."""
+"""Window picker page: search, target selection, and covered-capture guidance."""
+
+import threading
 
 from PyQt6.QtCore import QFileInfo, QSettings, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QKeySequence, QShortcut
@@ -7,6 +9,7 @@ from PyQt6.QtWidgets import (QCheckBox, QFileIconProvider, QHBoxLayout,
                              QPushButton, QVBoxLayout, QWidget)
 
 from ghostrec.core.library import unique_recording_name
+from ghostrec.core.apps import is_record_friendly, is_throttle_prone
 from ghostrec.core.recorder import sanitize_recording_name
 from ghostrec.core.windows import list_windows
 from ghostrec.ui.widgets import WindowCardWidget
@@ -17,12 +20,16 @@ class PickerPage(QWidget):
 
     record_requested = pyqtSignal(dict, str)
     chrome_requested = pyqtSignal()
+    _windows_ready = pyqtSignal(int, object, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._wins = []
         self._busy = False
         self._output_dir = ""
+        self._refreshing = False
+        self._refresh_generation = 0
+        self._filter_text = ""
         self._icon_provider = QFileIconProvider()
         self._icons = {}  # exe_path -> QIcon
 
@@ -36,20 +43,42 @@ class PickerPage(QWidget):
         title = QLabel("Select Target Window")
         title.setObjectName("pageTitle")
         title_box.addWidget(title)
-        subtitle = QLabel("Locks onto this exact window by HWND — background activity and other apps are never captured.")
-        subtitle.setObjectName("muted")
+        subtitle = QLabel(
+            "Choose one restored window. GhostRec keeps capturing it while "
+            "another app sits on top.")
+        subtitle.setObjectName("pageSubtitle")
         title_box.addWidget(subtitle)
         lay.addLayout(title_box)
+
+        mode_card = QWidget()
+        mode_card.setObjectName("captureModeCard")
+        mode_lay = QVBoxLayout(mode_card)
+        mode_lay.setContentsMargins(14, 10, 14, 10)
+        mode_lay.setSpacing(2)
+        mode_title = QLabel("Covered-window mode · Modern WGC")
+        mode_title.setObjectName("captureModeTitle")
+        mode_text = QLabel(
+            "Keep the target visible but covered; do not minimize it. "
+            "Other windows will not enter the recording.")
+        mode_text.setObjectName("captureModeText")
+        mode_text.setWordWrap(True)
+        mode_lay.addWidget(mode_title)
+        mode_lay.addWidget(mode_text)
+        lay.addWidget(mode_card)
 
         # Top Bar (Window counter + Refresh controls, No Search)
         top = QHBoxLayout()
         self.count_label = QLabel("Scanning windows…")
-        self.count_label.setStyleSheet("color: #9ca3af; font-size: 12px; font-weight: 500;")
+        self.count_label.setObjectName("muted")
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Filter windows…")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setMaximumWidth(240)
         self.auto_refresh = QCheckBox("Auto-refresh")
         self.auto_refresh.setChecked(True)
-        self.refresh_btn = QPushButton("↻ Refresh List")
+        self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.setObjectName("accent")
-        self.chrome_btn = QPushButton("🌐 Isolated recording Chrome")
+        self.chrome_btn = QPushButton("Open safe browser")
         self.chrome_btn.setObjectName("accent")
         self.chrome_btn.setToolTip(
             "Opens a SEPARATE Chrome instance with anti-throttle flags, so it "
@@ -58,6 +87,7 @@ class PickerPage(QWidget):
             "Use the Live page button to restart your normal Chrome instead.")
 
         top.addWidget(self.count_label)
+        top.addWidget(self.search_edit)
         top.addStretch(1)
         top.addWidget(self.auto_refresh)
         top.addWidget(self.chrome_btn)
@@ -66,37 +96,15 @@ class PickerPage(QWidget):
 
         # Card List of Windows
         self.list_widget = QListWidget()
+        self.list_widget.setObjectName("windowList")
         self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.list_widget.setSpacing(4)
-        self.list_widget.setStyleSheet("""
-            QListWidget {
-                background: #0f1118;
-                border: 1px solid #1f2230;
-                border-radius: 10px;
-                padding: 6px;
-            }
-            QListWidget::item {
-                background: #141722;
-                border: 1px solid #202434;
-                border-radius: 8px;
-                margin-bottom: 2px;
-            }
-            QListWidget::item:hover {
-                background: #1a1e2c;
-                border-color: #3b4259;
-            }
-            QListWidget::item:selected {
-                background: #231e3d;
-                border: 1px solid #815bf5;
-            }
-        """)
         lay.addWidget(self.list_widget, 1)
 
         # Bottom Bar: Recording Name + Start CTA
         bottom = QHBoxLayout()
         bottom.setSpacing(8)
-        name_lbl = QLabel("File name:")
-        name_lbl.setStyleSheet("font-weight: 600; color: #9ca3af;")
+        name_lbl = QLabel("Save as")
         bottom.addWidget(name_lbl)
 
         self.name_edit = QLineEdit()
@@ -107,7 +115,7 @@ class PickerPage(QWidget):
         self.save_hint.setObjectName("dimmed")
         bottom.addWidget(self.save_hint)
 
-        self.start_btn = QPushButton("● Start Recording")
+        self.start_btn = QPushButton("Start recording")
         self.start_btn.setObjectName("primary")
         self.start_btn.setMinimumHeight(38)
         bottom.addWidget(self.start_btn)
@@ -115,10 +123,12 @@ class PickerPage(QWidget):
 
         # Signals
         self.name_edit.textChanged.connect(self._update_hint)
+        self.search_edit.textChanged.connect(self._set_filter)
         self.refresh_btn.clicked.connect(self.refresh)
         self.chrome_btn.clicked.connect(self.chrome_requested.emit)
         self.start_btn.clicked.connect(self._start)
         self.list_widget.itemDoubleClicked.connect(lambda *_: self._start())
+        self._windows_ready.connect(self._apply_windows)
         # Enter starts the recording for the selected window
         for key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             QShortcut(QKeySequence(key), self.list_widget,
@@ -158,10 +168,40 @@ class PickerPage(QWidget):
         """Disable starting (a recording is in progress) and pause refresh."""
         self._busy = busy
         self.start_btn.setEnabled(not busy)
-        self.start_btn.setText("● Start Recording" if not busy
-                               else "● Recording in progress…")
+        self.start_btn.setText("Start recording" if not busy
+                               else "Recording in progress…")
 
     def refresh(self):
+        if self._refreshing:
+            return
+        self._refreshing = True
+        self._refresh_generation += 1
+        token = self._refresh_generation
+        self.count_label.setText("Scanning windows…")
+
+        def work():
+            try:
+                windows = list_windows()
+                for win in windows:
+                    exe = (win.get("exe") or "").lower()
+                    if is_throttle_prone(exe):
+                        # PowerShell process inspection stays off the Qt thread;
+                        # the result travels with the selected window snapshot.
+                        win["record_friendly"] = is_record_friendly(
+                            win.get("pid"))
+                error = ""
+            except Exception as e:
+                windows = []
+                error = str(e)
+            self._windows_ready.emit(token, windows, error)
+
+        threading.Thread(target=work, name="ghostrec-window-scan",
+                         daemon=True).start()
+
+    def _apply_windows(self, token, windows, error):
+        if token != self._refresh_generation:
+            return
+        self._refreshing = False
         prev_hwnd = None
         item = self.list_widget.currentItem()
         if item is not None:
@@ -169,13 +209,18 @@ class PickerPage(QWidget):
             if prev_data:
                 prev_hwnd = prev_data.get("hwnd")
 
-        self._wins = list_windows()
+        self._wins = windows
         self.list_widget.clear()
 
-        count = len(self._wins)
-        self.count_label.setText(f"● {count} open windows available")
+        needle = self._filter_text.strip().lower()
+        visible = [w for w in self._wins if not needle or needle in
+                   f"{w.get('title', '')}\n{w.get('exe', '')}\n"
+                   f"{w.get('cls', '')}".lower()]
+        count = len(visible)
+        self.count_label.setText(
+            f"⚠ {error}" if error else f"{count} of {len(self._wins)} windows")
 
-        for w in self._wins:
+        for w in visible:
             item = QListWidgetItem(self.list_widget)
             item.setSizeHint(QSize(0, 50))
             item.setData(Qt.ItemDataRole.UserRole, w)
@@ -191,6 +236,11 @@ class PickerPage(QWidget):
         # If nothing selected, select the first window by default
         if self.list_widget.currentItem() is None and count > 0:
             self.list_widget.setCurrentRow(0)
+
+    def _set_filter(self, text):
+        self._filter_text = text
+        if self._wins:
+            self._apply_windows(self._refresh_generation, self._wins, "")
 
     # -- internals ----------------------------------------------------------- #
 
