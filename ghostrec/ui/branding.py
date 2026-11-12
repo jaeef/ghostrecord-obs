@@ -27,10 +27,7 @@ def _assets_dir() -> Path:
 ASSETS = _assets_dir()
 
 ICON_ICO = ASSETS / "app.ico"
-ICON_SVG = ASSETS / "icon.svg"            # white mark, transparent
 ICON_DARK_SVG = ASSETS / "icon-dark.svg"  # mark on the graphite plate
-ICON_LIGHT_SVG = ASSETS / "icon-light.svg"  # graphite mark, transparent
-MARK_MONO_SVG = ASSETS / "mark-mono.svg"
 TRAY_IDLE_SVG = ASSETS / "tray-idle.svg"  # plate mark without the REC dot
 
 REC_COLOR = "#FF453A"

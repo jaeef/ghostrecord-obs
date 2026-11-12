@@ -4,7 +4,7 @@ rem  GhostRec OBS - desktop app launcher
 rem  Runs the PyQt6 app (window picker, live status, tray).
 rem
 rem  The console window stays open for diagnostics; you can
-rem  minimize it. Use start_recorder.bat for the classic CLI.
+rem  minimize it. For the terminal version run: python record.py
 rem ============================================================
 setlocal
 title GhostRec OBS

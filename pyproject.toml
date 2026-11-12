@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ghostrec-obs"
+description = "Record one window, only that window — an OBS automation layer for Windows."
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["version"]
+authors = [{ name = "jaeef" }]
+keywords = ["obs", "screen-recording", "window-capture", "windows", "pyqt6"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Environment :: Win32 (MS Windows)",
+    "Topic :: Multimedia :: Video :: Capture",
+]
+dependencies = [
+    "obsws-python>=1.7.0",
+    "pywin32>=306",
+    "PyQt6>=6.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.urls]
+Homepage = "https://github.com/jaeef/ghostrecord-obs"
+Issues = "https://github.com/jaeef/ghostrecord-obs/issues"
+
+[project.scripts]
+ghostrec-cli = "ghostrec.cli:run"
+
+[project.gui-scripts]
+ghostrec = "ghostrec.ui.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "ghostrec.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["ghostrec*"]
+
+[tool.setuptools.package-data]
+"ghostrec.ui" = ["assets/*.svg", "assets/*.ico"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

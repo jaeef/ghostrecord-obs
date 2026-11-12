@@ -101,7 +101,7 @@ def test_connection(host, port, password, timeout=4):
 
 
 # --------------------------------------------------------------------------- #
-# OBS process helpers (from configure.py)                                      #
+# OBS process helpers                                                          #
 # --------------------------------------------------------------------------- #
 
 OBS_PATHS = [
@@ -120,16 +120,6 @@ WINDOW_CAPTURE_WGC = 2
 # "only this window" contract, so GhostRec always uses TITLE and re-aims the
 # source itself the moment the pinned window is renamed.
 WINDOW_PRIORITY_TITLE = 1
-
-
-def is_obs_running():
-    try:
-        out = subprocess.check_output(
-            ["tasklist", "/FI", "IMAGENAME eq obs64.exe"],
-            text=True, stderr=subprocess.DEVNULL)
-        return "obs64.exe" in out
-    except Exception:
-        return False
 
 
 def is_port_listening(port, host="127.0.0.1", timeout=0.4):

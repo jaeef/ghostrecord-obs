@@ -13,7 +13,7 @@ you close it.
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![OBS Studio 28+](https://img.shields.io/badge/OBS%20Studio-28%2B-302E33?style=flat-square&logo=obsstudio&logoColor=white)](https://obsproject.com/)
 [![Windows 10 / 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](https://www.microsoft.com/windows)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-2ea44f?style=flat-square)](https://github.com/jaeef/ghostrec-obs/pulls)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-2ea44f?style=flat-square)](https://github.com/jaeef/ghostrecord-obs/pulls)
 
 **Pick a window → Record → Close to stop → Done.**
 
@@ -85,28 +85,30 @@ own work stay out of the video.
 ### One-click (recommended)
 
 1. Clone the repository
-2. Double-click `start_gui.bat` for the desktop app, or `start_recorder.bat` for
-   the CLI
+2. Double-click `start_gui.bat`
 
-The launchers check Python, install dependencies, help you enable the OBS
-WebSocket server, create `config.json`, test the connection, and start the app.
+The launcher checks Python, installs dependencies on first run, creates
+`config.json`, and starts the app. Enter your OBS WebSocket password in
+**Settings** and click **Test Connection**.
 
 ### Manual
 
 ```bash
-git clone https://github.com/jaeef/ghostrec-obs.git
-cd ghostrec-obs
+git clone https://github.com/jaeef/ghostrecord-obs.git
+cd ghostrecord-obs
 
 pip install -r requirements.txt
-python configure.py    # interactive config helper
 ```
 
 Then run either front-end:
 
 ```bash
-python app.py          # desktop app (PyQt6)
+python app.py          # desktop app (PyQt6)   — or: python -m ghostrec
 python record.py       # terminal picker
 ```
+
+Prefer commands? `pip install -e .` adds `ghostrec` (app) and `ghostrec-cli`
+to your PATH.
 
 ---
 
@@ -175,7 +177,7 @@ current directory in the CLI.
 
 ## Configuration
 
-`configure.py` (or the first launcher run) creates `config.json` next to the code.
+The first launch (app or CLI) creates `config.json` next to the code.
 The GUI's Settings page edits the same file.
 
 ```json
@@ -238,7 +240,7 @@ on save.
 1. **OBS Studio → Tools → WebSocket Server Settings**
 2. Check **Enable WebSocket server** (port `4455`)
 3. Copy the **Server Password** (or leave it empty)
-4. Run `configure.py` or the launcher and paste it when asked
+4. Paste it in GhostRec → **Settings → OBS WebSocket** and click **Test Connection**
 
 Prefer a manual start? Copy `config.example.json` to `config.json` and edit the
 password.
@@ -271,7 +273,7 @@ password.
 
 | Symptom | Fix |
 |---------|-----|
-| Recording is black or empty (Intel iGPU) | Window Capture needs a GPU-disabled browser on these machines. Run `open_class_browser.bat` (Chrome with `--disable-gpu` and a separate profile), join in that window, then record it. Avoid the Teams desktop app. |
+| Recording is black or empty (Intel iGPU) | Window Capture needs a GPU-disabled browser on these machines. Start Chrome with `--disable-gpu` (separate profile via `--user-data-dir`), join in that window, then record it. Avoid the Teams desktop app. |
 | Another window covers the target | Keep the target restored, enable **Covered-window protection**, and use Window Capture + Modern WGC. GhostRec captures the target surface, not the topmost browser. If the target is Chrome/Edge/Electron and its own content stops updating, use the recording-safe browser launcher; capture cannot force an app to render frames it throttles itself. |
 | Recording freezes when the window is minimized | Restore the window. Minimized windows produce no frames — GhostRec warns after `audio.minimize_warn_seconds`. |
 | `Connection failed` | OBS WebSocket server must be enabled, port `4455`, password identical to `config.json`. Use **Test Connection** in Settings. |
@@ -297,9 +299,11 @@ password.
 
 ```
 ghostrec-obs/
-├── app.py                     # Desktop app entry point (PyQt6)
-├── record.py                  # CLI front-end (same core)
+├── app.py                     # Desktop app entry point
+├── record.py                  # CLI entry point
 ├── ghostrec/
+│   ├── __main__.py            # python -m ghostrec  -> desktop app
+│   ├── cli.py                 # terminal front-end
 │   ├── core/                  # No Qt imports
 │   │   ├── config.py          #   load / validate / save config.json
 │   │   ├── windows.py         #   window enumeration + identity
@@ -310,8 +314,8 @@ ghostrec-obs/
 │   │   ├── thumbs.py          #   window thumbnails (PrintWindow)
 │   │   └── library.py         #   recordings folder, Recycle Bin
 │   └── ui/                    # PyQt6 shell
-│       ├── pages/             #   picker, live, library, settings
-│       ├── assets/            #   logo SVGs + app.ico
+│       ├── pages/             #   record, live, library, settings
+│       ├── assets/            #   logo + control SVGs, app.ico
 │       ├── branding.py        #   QIcon helpers
 │       ├── theme.py           #   macOS light/dark palette + QSS
 │       ├── chrome.py          #   traffic lights, frameless move/resize
@@ -319,13 +323,14 @@ ghostrec-obs/
 │       ├── widgets.py         #   reusable widgets
 │       ├── preview.py         #   live preview worker
 │       └── tray.py            #   system tray
-├── docs/PRODUCT_VALIDATION.md # Idea + SaaS assessment
-├── configure.py               # Dependency & config helper (interactive)
+├── tests/                     # pytest suite (fake OBS, offscreen Qt)
+├── .github/workflows/         # CI: tests on Windows
 ├── config.example.json        # Config template
-├── requirements.txt
-├── start_gui.bat              # One-click GUI launcher
-├── start_recorder.bat         # One-click CLI launcher
-├── open_class_browser.bat     # GPU-disabled Chrome helper (Intel iGPU)
+├── pyproject.toml             # Metadata, dependencies, commands
+├── requirements.txt           # Runtime dependencies
+├── requirements-dev.txt       # + pytest
+├── start_gui.bat              # One-click launcher
+├── CHANGELOG.md
 └── README.md
 ```
 
@@ -339,14 +344,23 @@ ghostrec-obs/
 | Colors or QSS | `ghostrec/ui/theme.py` |
 | Icons or logo helpers | `ghostrec/ui/assets/` + `ghostrec/ui/branding.py` |
 | A background worker | `ghostrec/ui/preview.py`, or a new `ghostrec/core/` module |
-| A CLI flag | `record.py` (shares the same core) |
+| A CLI flag | `ghostrec/cli.py` (shares the same core) |
+| A test | `tests/` (use the `FakeObs` fixture in `conftest.py`) |
 
 ---
 
 ## Contributing
 
 - Keep `ghostrec/core` free of Qt imports so the CLI and the GUI stay in sync.
-- Test both front-ends against a real OBS instance before opening a PR.
+- Run the tests before opening a PR:
+
+  ```bash
+  pip install -r requirements-dev.txt
+  python -m pytest
+  ```
+
+- Test both front-ends against a real OBS instance for capture changes.
+- See [CHANGELOG.md](CHANGELOG.md) for release notes.
 - Open an issue for bugs or feature requests; PRs are welcome.
 
 ---

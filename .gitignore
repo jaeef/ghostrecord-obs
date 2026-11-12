@@ -28,11 +28,11 @@ run_log.txt
 run_err.txt
 *.log
 
-# --- local notes and scratch ----------------------------------------------------
+# --- local notes and scratch (kept on disk, never pushed) ----------------------
+docs/
 FUTURE.md
 ghostrec-desktop-app.md
 workngtree.md
-tests/
 
 # --- generated images, except tracked app assets ------------------------------
 *.png

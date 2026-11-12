@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <g stroke="currentColor" stroke-width="12" stroke-linecap="round"
-     stroke-linejoin="round" fill="none">
-    <path d="M 50 104 V 50 H 104"/><path d="M 152 50 H 206 V 104"/><path d="M 50 152 V 206 H 104"/><path d="M 152 206 H 206 V 152"/>
-  </g>
-  <path d="M 94 164 V 116 a 34 34 0 0 1 68 0 V 164 a 11.33 11.33 0 0 1 -22.67 0 a 11.33 11.33 0 0 1 -22.66 0 a 11.33 11.33 0 0 1 -22.67 0 Z M 108.5 119 a 5.5 9 0 1 0 11.0 0 a 5.5 9 0 1 0 -11.0 0 Z M 136.5 119 a 5.5 9 0 1 0 11.0 0 a 5.5 9 0 1 0 -11.0 0 Z" fill="currentColor" fill-rule="evenodd"/>
-  <circle cx="206" cy="50" r="15" fill="currentColor" stroke="none"
-          stroke-width="6"/>
-</svg>
