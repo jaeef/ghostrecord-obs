@@ -26,14 +26,20 @@ from datetime import datetime
 
 import obsws_python as obsws
 
-from ghostrec.core.apps import is_record_friendly, is_throttle_prone
+from ghostrec.core.safe_apps import app_kind, app_name, is_recording_safe
 from ghostrec.core.obs import (WINDOW_CAPTURE_WGC, ObsError, RecordingLock,
                                capture_method_for, check_scene_safety,
                                ensure_scene_and_source, fit_source_to_canvas,
                                point_source_at, stop_and_finalize)
-from ghostrec.core.windows import (get_window_info, is_window_alive,
-                                   is_window_covered, is_window_minimized,
-                                   obs_window_value, same_window_identity)
+from ghostrec.core.windows import (get_window_info, identical_windows,
+                                   is_window_alive, is_window_covered,
+                                   is_window_minimized, obs_window_value,
+                                   same_window_identity)
+
+# How often the pinned window's title is checked between full status polls.
+# OBS binds by exact title, so a rename must be followed quickly or the source
+# goes blank until the next re-aim (it never jumps to another window).
+PIN_WATCH_SECONDS = 0.25
 
 
 def sanitize_recording_name(raw):
@@ -121,6 +127,11 @@ class RecorderSession:
         self._rec_started_at = 0.0
         self._restart_attempts = 0
         self._recording_lock = None
+        self._pinned = None
+        self._last_pointed = ""
+        self._method = 2
+        self._kind = "window"
+        self._previous_scene = ""  # user's Program scene, restored afterwards
 
     # -- control ---------------------------------------------------------- #
 
@@ -149,7 +160,12 @@ class RecorderSession:
     # -- internals --------------------------------------------------------- #
 
     def _log(self, tag, text):
-        self.emit({"type": "note", "source": tag, "text": text})
+        # A failing log sink (e.g. a console that cannot print a symbol) must
+        # never break recording control or file handling.
+        try:
+            self.emit({"type": "note", "source": tag, "text": text})
+        except Exception:
+            pass
 
     def _finalize(self, trigger):
         """Stop and file the owned OBS output exactly once."""
@@ -192,11 +208,78 @@ class RecorderSession:
                 self._finalize("error")
             self.emit({"type": "error", "text": str(e)})
         finally:
+            self._restore_previous_scene()
             if self._recording_lock:
                 self._recording_lock.release()
                 self._recording_lock = None
             self._result = status
             self.emit({"type": "finished", "result": status})
+
+    def _warn_identical(self, win):
+        """Warn when OBS could confuse the target with an identical twin."""
+        try:
+            twins = identical_windows(win)
+        except Exception:
+            return
+        if twins:
+            text = (f"{len(twins)} other window(s) share the exact title "
+                    f"'{win.get('title', '')[:50]}' - OBS cannot tell them "
+                    "apart. Close or rename the twin so only your target is "
+                    "captured.")
+            self._log("pin", f"\u26a0 {text}")
+            self.emit({"type": "warning", "kind": "duplicate", "text": text})
+
+    def _watch_pin(self):
+        """Re-aim OBS the moment the pinned window is renamed.
+
+        Returns False when the pinned window is gone (recording should stop).
+        """
+        hwnd = self._pinned["hwnd"]
+        if not is_window_alive(hwnd):
+            return False
+        fresh = get_window_info(hwnd)
+        if not fresh:
+            # The handle can disappear between IsWindow and this lookup.
+            return False
+        if not same_window_identity(self.window, fresh):
+            raise ObsError("the selected HWND now belongs to a different window")
+        value = obs_window_value(fresh)
+        if value != self._last_pointed:
+            self._log("pin", "window title changed - re-locking the SAME "
+                             f"window: '{fresh['title'][:60]}'")
+            point_source_at(self.req, self._source, fresh, method=self._method,
+                            kind=self._kind)
+            self._last_pointed = value
+            self.emit({"type": "relocked", "title": fresh["title"]})
+            self._warn_identical(fresh)
+        self._pinned = fresh
+        return True
+
+    def _restore_previous_scene(self):
+        """Put OBS back on the scene the user had before recording.
+
+        Only when OBS is not recording anymore and Program is still our
+        dedicated scene — if the user switched scenes meanwhile, leave it.
+        """
+        prev = self._previous_scene
+        if not prev:
+            return
+        try:
+            if self.req.get_record_status().output_active:
+                return
+            scenes = self.req.get_scene_list()
+            names = [s["sceneName"] for s in scenes.scenes]
+            if (scenes.current_program_scene_name == self._scene
+                    and prev in names):
+                self.req.set_current_program_scene(prev)
+                self._log("obs", f"restored OBS scene '{prev}'")
+        except Exception as e:
+            self._log("obs", f"could not restore OBS scene '{prev}': {e}")
+
+    def _log_closed(self):
+        duration = _hms(time.time() - self._rec_started_at)
+        self._log("rec", f"\u25a0 STOPPED  ({duration}) - recorded window "
+                         "closed. Finalizing, do not close OBS...")
 
     def _detect_throttle_risk(self):
         """Does the target app stop painting itself when covered?
@@ -207,16 +290,18 @@ class RecorderSession:
         """
         win = self.window
         exe = (win.get("exe") or "").lower()
-        if not is_throttle_prone(exe):
+        kind = app_kind(exe)
+        if kind is None:
             self._throttle_safe = True
             return
-        friendly = is_record_friendly(win.get("pid"))
+        friendly = is_recording_safe(win.get("pid"), exe)
         self._throttle_safe = bool(friendly)
         self.emit({"type": "capture_advice", "exe": exe, "friendly": friendly,
+                   "kind": kind, "app": app_name(exe),
                    "window_title": win.get("title", "")})
         if not friendly:
-            self._log("pin", "this app stops rendering when covered — open the "
-                             "recording-friendly Chrome for a sharp video")
+            self._log("pin", f"{app_name(exe)} stops drawing when covered — "
+                             "make it recording-safe for the next recording")
 
     def _record(self):
         cfg = self.cfg
@@ -266,6 +351,12 @@ class RecorderSession:
                                 method=method, kind=kind)
         point_source_at(req, source, self.window, method=method, kind=kind)
         fit_source_to_canvas(req, scene, source, log=self._log)
+        try:
+            current = req.get_scene_list().current_program_scene_name
+            if current and current != scene:
+                self._previous_scene = current
+        except Exception:
+            pass
         req.set_current_program_scene(scene)  # record ONLY this window
 
         # SAFETY: verify the switch actually happened, the scene contains only
@@ -295,10 +386,27 @@ class RecorderSession:
             raise
 
         self._recording_started = True
+        # StartRecord returns before the output is running. Polling status
+        # right away reads "inactive" and used to trigger a needless restart
+        # (an extra file segment), so wait for OBS to confirm first.
+        start_deadline = time.monotonic() + 10
+        while time.monotonic() < start_deadline:
+            try:
+                if req.get_record_status().output_active:
+                    break
+            except Exception:
+                pass
+            time.sleep(0.2)
+        else:
+            raise ObsError("OBS did not start recording within 10 seconds")
         self._rec_started_at = time.time()
         rec_started = self._rec_started_at
         pinned = get_window_info(self.window["hwnd"]) or dict(self.window)
-        last_pointed = obs_window_value(pinned)
+        self._pinned = pinned
+        self._last_pointed = obs_window_value(self.window)
+        self._method = int(method)
+        self._kind = kind
+        self._warn_identical(pinned)
         min_warn_sec = audio_cfg.get("minimize_warn_seconds", 60)
         last_min_warn = 0.0
         last_occlusion_warn = 0.0
@@ -329,7 +437,9 @@ class RecorderSession:
                             "OBS recording output stopped repeatedly; "
                             "session stopped to avoid losing more output")
                     self._restart_attempts += 1
-                    self._log("rec", "output not active — restarting record")
+                    self._log("rec", "output not active — restarting record "
+                                     "(the earlier segment stays in OBS's "
+                                     "own recording folder)")
                     req.start_record()
                     rec_started = time.time()
                     self._rec_started_at = rec_started
@@ -343,30 +453,12 @@ class RecorderSession:
                         "OBS recording status could not be read repeatedly")
                 self._log("rec", f"status check failed: {e}")
 
-            # 2) PIN: the recorded window itself still alive?
-            if not is_window_alive(pinned["hwnd"]):
-                duration = _hms(time.time() - self._rec_started_at)
-                self._log("rec", f"■ STOPPED  ({duration}) — recorded window "
-                                 f"closed. Finalizing, do not close OBS...")
+            # 2) PIN: still alive? re-aim OBS if the title changed
+            if not self._watch_pin():
+                self._log_closed()
                 break
-
-            # 2a) refresh pinned info; re-lock OBS if the window identity changed
-            fresh = get_window_info(pinned["hwnd"])
-            if fresh:
-                if not same_window_identity(self.window, fresh):
-                    raise ObsError(
-                        "the selected HWND now belongs to a different window")
-                if obs_window_value(fresh) != last_pointed:
-                    self._log("pin", "window title changed — re-locking the "
-                                     f"SAME window: '{fresh['title'][:60]}'")
-                    self.emit({"type": "relocked", "title": fresh["title"]})
-                    point_source_at(req, source, fresh, method=method,
-                                    kind=kind)
-                    last_pointed = obs_window_value(fresh)
-                pinned = fresh
-            else:
-                # The handle can disappear between IsWindow and this lookup.
-                break
+            pinned = self._pinned
+            method = self._method
 
             # The user or another OBS integration may have changed Program
             # scene/source after the initial setup. Stop before another scene
@@ -401,6 +493,7 @@ class RecorderSession:
                     point_source_at(req, source, pinned,
                                     method=WINDOW_CAPTURE_WGC, kind=kind)
                     method = WINDOW_CAPTURE_WGC
+                    self._method = method
                     covered_wgc_applied = True
                 if (not self._throttle_safe
                         and time.time() - last_occlusion_warn > min_warn_sec):
@@ -438,7 +531,23 @@ class RecorderSession:
                        "audio_check": bool(self.audio and audio_cfg.get("check")),
                        "audio_db": self.audio.last_db() if self.audio else -100.0,
                        "silent_for": self.audio.silent_for() if self.audio else 0.0})
-            self._stop.wait(poll)
+
+            # Between full polls, watch the title closely so OBS is re-aimed
+            # within PIN_WATCH_SECONDS of a rename.
+            deadline = time.monotonic() + poll
+            closed = False
+            while not self._stop.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                if self._stop.wait(min(PIN_WATCH_SECONDS, remaining)):
+                    break
+                if not self._watch_pin():
+                    closed = True
+                    break
+            if closed:
+                self._log_closed()
+                break
 
         self._finalize(trigger)
         return "interrupted" if trigger == "user_stop" else "done"

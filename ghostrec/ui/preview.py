@@ -8,7 +8,6 @@ Frames are pushed to the GUI through the main event queue:
 
 import base64
 import threading
-import time
 
 import obsws_python as obsws
 

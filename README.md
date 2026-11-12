@@ -58,12 +58,14 @@ own work stay out of the video.
 
 | Area | What it does |
 |------|--------------|
-| **HWND lock** | Pins the exact window by handle. Title changes re-lock the same window; other windows are never captured. |
+| **HWND lock** | GhostRec tracks the exact window by handle and aims OBS at it with *title must match* (never "same type" fallback). A rename is re-aimed within ~0.25 s; identical twin windows trigger a warning. |
 | **Dedicated scene** | Creates an OBS scene containing only the window capture source and the audio input — no manual OBS setup. |
 | **Stop on close** | Closing the recorded window finalizes and saves the file. Title changes never stop it. |
 | **Covered-window capture** | Uses Windows Graphics Capture (WGC) so a restored target remains isolated when another window is placed on top; warns when the target app itself throttles rendering. |
+| **Make recording-safe** | Chromium apps (Chrome, Edge, Brave, Opera, Vivaldi), Electron apps (Slack, Discord, VS Code, classic Teams…) and new Teams (WebView2) stop drawing when covered. One click restarts them with switches that keep them drawing; GhostRec asks before force-quitting anything and the WebView2 setting can be removed in Settings. |
 | **Audio monitoring** | Silence detection with a threshold and timeout, plus a live level meter. |
-| **Recording library** | Browse, play, reveal and delete recordings, with date, size and duration details. |
+| **Recording library** | Browse, play, reveal and move recordings to the Recycle Bin, with date, size and duration details. |
+| **macOS-style UI** | Sidebar + unified toolbar, traffic-light window controls, light/dark appearance that follows Windows (or set it in Settings). |
 | **System tray** | Idle/recording tray icon, stop-from-tray, notifications, single-instance guard. |
 | **CLI + GUI** | Same core and the same `config.json`; use whichever fits. |
 
@@ -96,7 +98,7 @@ git clone https://github.com/jaeef/ghostrec-obs.git
 cd ghostrec-obs
 
 pip install -r requirements.txt
-python setup.py        # interactive config helper
+python configure.py    # interactive config helper
 ```
 
 Then run either front-end:
@@ -127,10 +129,10 @@ header if OBS was started afterwards.
 
 | Page | What you get |
 |------|--------------|
-| **Record** | Window list with process/HWND details, auto-refresh, file-name field, Start button. |
-| **Live** | Timer, target card (PID/HWND), status pills (output, minimized, covered), capture-source switch, audio meter, silence banner, live preview, activity log, Stop & Save. |
-| **Library** | Table of recordings (name, date, size, format), details pane, Play, Show in Explorer, Delete. |
-| **Settings** | OBS host/port/password with show toggle, Test Connection, 1-click Launch OBS (minimized), scene/source names, capture method and source, `capture.auto`, output folder, audio thresholds. |
+| **Record** | Gallery of open windows with live thumbnails, search and All / Browsers / Apps filters. A "Ready to record" panel shows the selected window, a checklist (OBS connected, window restored, keeps drawing when covered — with one-click **Connect** / **Fix**), the file name and the Start Recording button. |
+| **Live** | Live preview, timer with REC badge, target, status rows (output, window, covered), audio meter, capture-source switch, warnings with one-click fixes, and a filterable activity log (All / Warnings / Errors, Copy, Clear). Stop & Save stays pinned. |
+| **Library** | Table of recordings (name, date, size, format), details pane, Play, Show in Folder, Move to Recycle Bin. |
+| **Settings** | Appearance (auto / light / dark, native title bar), OBS host/port/password, Test Connection, Launch OBS, scene/source names, capture method and source, Teams/WebView2 recording-safe setting (with Remove), output folder, audio thresholds. |
 
 Closing the window while a recording is running keeps GhostRec in the tray
 instead of killing the session. Use the tray menu to stop or quit.
@@ -173,7 +175,7 @@ current directory in the CLI.
 
 ## Configuration
 
-`setup.py` (or the first launcher run) creates `config.json` next to the code.
+`configure.py` (or the first launcher run) creates `config.json` next to the code.
 The GUI's Settings page edits the same file.
 
 ```json
@@ -199,6 +201,10 @@ The GUI's Settings page edits the same file.
     "silence_db": -55.0,
     "silence_alert_seconds": 30,
     "minimize_warn_seconds": 60
+  },
+  "ui": {
+    "appearance": "auto",
+    "native_frame": false
   }
 }
 ```
@@ -221,6 +227,8 @@ The GUI's Settings page edits the same file.
 | `audio.silence_db` | `-55.0` | Silence threshold in dB |
 | `audio.silence_alert_seconds` | `30` | Silence duration before warning |
 | `audio.minimize_warn_seconds` | `60` | Minimized duration before warning |
+| `ui.appearance` | `auto` | `auto` follows Windows light/dark; `light` or `dark` forces it |
+| `ui.native_frame` | `false` | `true` keeps the standard Windows title bar instead of the macOS traffic lights |
 
 Missing keys are filled with these defaults on load; unknown keys are preserved
 on save.
@@ -230,7 +238,7 @@ on save.
 1. **OBS Studio → Tools → WebSocket Server Settings**
 2. Check **Enable WebSocket server** (port `4455`)
 3. Copy the **Server Password** (or leave it empty)
-4. Run `setup.py` or the launcher and paste it when asked
+4. Run `configure.py` or the launcher and paste it when asked
 
 Prefer a manual start? Copy `config.example.json` to `config.json` and edit the
 password.
@@ -292,16 +300,27 @@ ghostrec-obs/
 ├── app.py                     # Desktop app entry point (PyQt6)
 ├── record.py                  # CLI front-end (same core)
 ├── ghostrec/
-│   ├── core/                  # No Qt imports: config, windows, obs, recorder, library, apps
+│   ├── core/                  # No Qt imports
+│   │   ├── config.py          #   load / validate / save config.json
+│   │   ├── windows.py         #   window enumeration + identity
+│   │   ├── obs.py             #   OBS WebSocket: scene, source, record
+│   │   ├── recorder.py        #   RecorderSession state machine
+│   │   ├── safe_apps.py       #   "Make recording-safe" for any app
+│   │   ├── apps.py            #   separate safe-browser launcher
+│   │   ├── thumbs.py          #   window thumbnails (PrintWindow)
+│   │   └── library.py         #   recordings folder, Recycle Bin
 │   └── ui/                    # PyQt6 shell
 │       ├── pages/             #   picker, live, library, settings
 │       ├── assets/            #   logo SVGs + app.ico
 │       ├── branding.py        #   QIcon helpers
-│       ├── theme.py           #   palette + QSS
+│       ├── theme.py           #   macOS light/dark palette + QSS
+│       ├── chrome.py          #   traffic lights, frameless move/resize
+│       ├── dialogs.py         #   macOS-style alerts
 │       ├── widgets.py         #   reusable widgets
 │       ├── preview.py         #   live preview worker
 │       └── tray.py            #   system tray
-├── setup.py                   # Dependency & config helper
+├── docs/PRODUCT_VALIDATION.md # Idea + SaaS assessment
+├── configure.py               # Dependency & config helper (interactive)
 ├── config.example.json        # Config template
 ├── requirements.txt
 ├── start_gui.bat              # One-click GUI launcher

@@ -1,4 +1,4 @@
-"""Live page: Obsidian Studio recording dashboard.
+"""Live page: recording dashboard (preview + inspector).
 
 Shows the real-time state of the recording happening NOW: mono timer, pinned
 target card (title / PID / HWND), status pills, decibel meter, silence banner,
@@ -10,16 +10,16 @@ from datetime import datetime
 
 from PyQt6.QtCore import (QEasingCurve, QPropertyAnimation, Qt, QTimer,
                           pyqtSignal)
-from PyQt6.QtGui import QBrush, QColor, QPixmap
-from PyQt6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QListWidget,
-                              QListWidgetItem, QMessageBox, QPushButton,
-                              QVBoxLayout, QWidget)
+from PyQt6.QtGui import QPixmap
+from PyQt6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLabel,
+                              QListWidget, QListWidgetItem, QPushButton,
+                              QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
 
 from ghostrec.core.library import open_file, show_in_explorer
-from ghostrec.ui import theme
-from ghostrec.ui.widgets import ElidedLabel, LevelMeter, StatusPill
+from ghostrec.ui import dialogs
+from ghostrec.ui.widgets import (ActivityLog, ElidedLabel, LevelMeter,
+                                 StatusPill)
 
-_MAX_FEED = 200
 
 
 def _hms(sec):
@@ -29,7 +29,6 @@ def _hms(sec):
 
 class LivePage(QWidget):
     stop_requested = pyqtSignal()
-    back_requested = pyqtSignal()
     library_requested = pyqtSignal()
     capture_source_requested = pyqtSignal(str)
     record_chrome_requested = pyqtSignal()
@@ -48,158 +47,263 @@ class LivePage(QWidget):
         self._hwnd = 0
         self._capture_safe = False
 
-        lay = QVBoxLayout(self)
-        lay.setSpacing(8)
+        # Two columns. Left: notices, preview, activity. Right: a fixed-width
+        # inspector whose content SCROLLS instead of being squeezed, with the
+        # Stop button pinned at its bottom.
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(16)
+        left = QVBoxLayout()
+        left.setSpacing(10)
+        root.addLayout(left, 1)
 
-        # -- Timer -----------------------------------------------------------
-        self.timer_label = QLabel("00:00:00")
-        self.timer_label.setObjectName("bigTimer")
-        lay.addWidget(self.timer_label)
-
-        # -- Pinned target card ----------------------------------------------
-        self.target_card = QWidget()
-        self.target_card.setObjectName("targetCard")
-        card_lay = QVBoxLayout(self.target_card)
-        card_lay.setContentsMargins(16, 12, 16, 12)
-        card_lay.setSpacing(4)
-        self.target_title = ElidedLabel("—")
-        title_font = self.target_title.font()
-        title_font.setPointSize(title_font.pointSize() + 1)
-        title_font.setBold(True)
-        self.target_title.setFont(title_font)
-        card_lay.addWidget(self.target_title)
-        self.target_meta = QLabel("PID —  •  HWND —")
-        self.target_meta.setObjectName("mono")
-        card_lay.addWidget(self.target_meta)
-        lock_note = QLabel(
-            "Exact window lock · keep it restored and cover it freely.")
-        lock_note.setObjectName("muted")
-        card_lay.addWidget(lock_note)
-        lay.addWidget(self.target_card)
-
-        # -- Status pills ------------------------------------------------------
-        pills = QHBoxLayout()
-        pills.setSpacing(8)
-        self.pill_output = StatusPill("output idle", "idle")
-        self.pill_min = StatusPill("window OK", "idle")
-        self.pill_cover = StatusPill("", "idle")
-        pills.addWidget(self.pill_output)
-        pills.addWidget(self.pill_min)
-        pills.addWidget(self.pill_cover)
-        pills.addStretch(1)
-        # quick fix: switch capture type without digging into Settings
-        self.capture_combo = QComboBox()
-        self.capture_combo.addItem("Window · WGC covered mode", "window")
-        self.capture_combo.addItem("Game · supported apps", "game")
-        self.capture_combo.setToolTip(
-            "Window + Modern WGC is the reliable default for a restored window "
-            "covered by another app. Game Capture is only for apps that support "
-            "OBS game hooks. Applies to the next recording.")
-        pills.addWidget(self.capture_combo)
-        lay.addLayout(pills)
-        self.capture_combo.currentIndexChanged.connect(self._emit_capture_source)
-
-        # -- Meter + silence banner --------------------------------------------
-        self.meter = LevelMeter()
-        lay.addWidget(self.meter)
-
+        # -- notices (only visible when relevant) --------------------------------
         self.silence_banner = QLabel()
         self.silence_banner.setObjectName("silenceBanner")
+        self.silence_banner.setWordWrap(True)
         self.silence_banner.setVisible(False)
         self.silence_banner.setMaximumHeight(0)
-        lay.addWidget(self.silence_banner)
+        left.addWidget(self.silence_banner)
 
-        # -- advice banner (app stops rendering when covered) ------------------
         self.advice_box = QWidget()
-        advice_lay = QHBoxLayout(self.advice_box)
-        advice_lay.setContentsMargins(12, 8, 12, 8)
-        advice_lay.setSpacing(10)
         self.advice_box.setObjectName("adviceBox")
+        self.advice_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,
+                                     True)
+        advice = QVBoxLayout(self.advice_box)
+        advice.setContentsMargins(14, 10, 10, 10)
+        advice.setSpacing(8)
+        advice_top = QHBoxLayout()
+        advice_top.setSpacing(10)
+        advice_icon = QLabel("⚠")
+        advice_icon.setObjectName("noticeIconWarn")
         self.advice_label = QLabel("")
         self.advice_label.setWordWrap(True)
         self.advice_label.setObjectName("adviceText")
-        self.advice_btn = QPushButton("Prepare next Chrome capture")
+        self.advice_dismiss = QPushButton("✕")
+        self.advice_dismiss.setObjectName("closeButton")
+        self.advice_dismiss.setFixedSize(22, 22)
+        self.advice_dismiss.clicked.connect(self.advice_box.hide)
+        advice_top.addWidget(advice_icon, 0, Qt.AlignmentFlag.AlignTop)
+        advice_top.addWidget(self.advice_label, 1)
+        advice_top.addWidget(self.advice_dismiss, 0, Qt.AlignmentFlag.AlignTop)
+        advice.addLayout(advice_top)
+        advice_btns = QHBoxLayout()
+        advice_btns.addStretch(1)
+        self.advice_iso_btn = QPushButton("Open Safe Browser")
+        self.advice_iso_btn.setToolTip(
+            "Open a separate Chrome with its own recording-safe profile.")
+        self.advice_iso_btn.clicked.connect(self.isolated_chrome_requested.emit)
+        self.advice_btn = QPushButton("Make Recording-Safe")
         self.advice_btn.setObjectName("accent")
         self.advice_btn.setToolTip(
-            "Restart your own Chrome with anti-occlusion flags for the next "
-            "capture. Same profile, tabs restored.")
+            "Restart this app once with recording-safe settings so it keeps "
+            "drawing while covered. Applies to the next recording.")
         self.advice_btn.clicked.connect(self.record_chrome_requested.emit)
-        self.advice_iso_btn = QPushButton("Open isolated browser")
-        self.advice_iso_btn.setObjectName("accent")
-        self.advice_iso_btn.setToolTip(
-            "Open a separate Chrome instance with its own recording-safe profile "
-            "for the next capture.")
-        self.advice_iso_btn.clicked.connect(self.isolated_chrome_requested.emit)
-        self.advice_dismiss = QPushButton("✕")
-        self.advice_dismiss.setObjectName("accent")
-        self.advice_dismiss.setFixedWidth(32)
-        self.advice_dismiss.clicked.connect(self.advice_box.hide)
-        advice_lay.addWidget(self.advice_label, 1)
-        advice_lay.addWidget(self.advice_btn)
-        advice_lay.addWidget(self.advice_iso_btn)
-        advice_lay.addWidget(self.advice_dismiss)
+        advice_btns.addWidget(self.advice_iso_btn)
+        advice_btns.addWidget(self.advice_btn)
+        advice.addLayout(advice_btns)
         self.advice_box.hide()
-        lay.addWidget(self.advice_box)
+        left.addWidget(self.advice_box)
 
-        # -- Preview -------------------------------------------------------------
-        self.preview = QLabel("Live preview appears while recording")
-        self.preview.setObjectName("preview")
-        self.preview.setMinimumHeight(140)
-        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.preview)
-
-        # -- Error / result banners ---------------------------------------------
         self.banner = QLabel("")
         self.banner.setObjectName("banner")
         self.banner.setWordWrap(True)
         self.banner.hide()
-        lay.addWidget(self.banner)
+        left.addWidget(self.banner)
 
+        self.result_box = QWidget()
+        self.result_box.setObjectName("resultBox")
+        self.result_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,
+                                     True)
+        result_row = QHBoxLayout(self.result_box)
+        result_row.setContentsMargins(14, 8, 8, 8)
+        result_row.setSpacing(8)
+        ok_icon = QLabel("✓")
+        ok_icon.setObjectName("noticeIconOk")
         self.result_label = ElidedLabel("")
-        self.result_label.setObjectName("okBanner")
-        self.result_label.hide()
-        lay.addWidget(self.result_label)
-
-        result_btns = QHBoxLayout()
-        self.open_file_btn = QPushButton("Play recording")
-        self.open_folder_btn = QPushButton("Show in folder")
-        self.back_btn = QPushButton("Back to picker")
+        self.result_label.setObjectName("resultText")
+        self.open_file_btn = QPushButton("Play")
+        self.open_folder_btn = QPushButton("Show in Folder")
         self.open_file_btn.clicked.connect(self._open_file)
         self.open_folder_btn.clicked.connect(self._show_folder)
-        self.back_btn.clicked.connect(self.back_requested.emit)
-        for b in (self.open_file_btn, self.open_folder_btn):
-            b.hide()
-            result_btns.addWidget(b)
-        result_btns.addStretch(1)
-        lay.addLayout(result_btns)
+        result_row.addWidget(ok_icon)
+        result_row.addWidget(self.result_label, 1)
+        result_row.addWidget(self.open_folder_btn)
+        result_row.addWidget(self.open_file_btn)
+        self.result_box.hide()
+        left.addWidget(self.result_box)
 
-        # -- Activity feed --------------------------------------------------------
-        feed_title = QLabel("ACTIVITY")
-        feed_title.setObjectName("dimmed")
-        lay.addWidget(feed_title)
-        self.feed = QListWidget()
-        self.feed.setSelectionMode(QListWidget.SelectionMode.NoSelection)
-        lay.addWidget(self.feed, 1)
+        # -- preview ----------------------------------------------------------------
+        self.preview = QLabel("Live preview appears here while recording")
+        self.preview.setObjectName("preview")
+        self.preview.setMinimumSize(280, 160)
+        self.preview.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                   QSizePolicy.Policy.Ignored)
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        left.addWidget(self.preview, 1)
 
-        # -- Actions ----------------------------------------------------------------
-        controls = QHBoxLayout()
-        controls.setSpacing(10)
-        self.stop_btn = QPushButton("Stop & save")
+        # -- activity ----------------------------------------------------------------
+        self.feed = ActivityLog()
+        self.feed.setFixedHeight(176)
+        left.addWidget(self.feed)
+
+        # -- inspector ---------------------------------------------------------------
+        inspector = QWidget()
+        inspector.setObjectName("inspector")
+        inspector.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        inspector.setFixedWidth(300)
+        ins_outer = QVBoxLayout(inspector)
+        ins_outer.setContentsMargins(0, 0, 0, 0)
+        ins_outer.setSpacing(0)
+        root.addWidget(inspector)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("inspectorScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        body = QWidget()
+        body.setObjectName("inspectorBody")
+        ins = QVBoxLayout(body)
+        ins.setContentsMargins(18, 16, 18, 12)
+        ins.setSpacing(6)
+        scroll.setWidget(body)
+        ins_outer.addWidget(scroll, 1)
+
+        # timer
+        state_row = QHBoxLayout()
+        state_row.setSpacing(8)
+        self.state_label = QLabel("Ready")
+        self.state_label.setObjectName("sectionHeader")
+        state_row.addWidget(self.state_label)
+        state_row.addStretch(1)
+        self.rec_badge = QLabel("● REC")
+        self.rec_badge.setObjectName("recBadge")
+        self.rec_badge.hide()
+        state_row.addWidget(self.rec_badge)
+        ins.addLayout(state_row)
+        self.timer_label = QLabel("00:00:00")
+        self.timer_label.setObjectName("bigTimer")
+        ins.addWidget(self.timer_label)
+        ins.addSpacing(8)
+
+        # target
+        ins.addWidget(self._section("Target"))
+        self.target_card = QWidget()
+        self.target_card.setObjectName("groupCard")
+        self.target_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground,
+                                      True)
+        card_lay = QVBoxLayout(self.target_card)
+        card_lay.setContentsMargins(12, 10, 12, 10)
+        card_lay.setSpacing(3)
+        self.target_title = ElidedLabel("No window selected")
+        self.target_title.setObjectName("cardTitle")
+        card_lay.addWidget(self.target_title)
+        self.target_meta = QLabel("PID —  •  HWND —")
+        self.target_meta.setObjectName("mono")
+        card_lay.addWidget(self.target_meta)
+        ins.addWidget(self.target_card)
+        ins.addSpacing(8)
+
+        # status rows
+        ins.addWidget(self._section("Status"))
+        status_card = QWidget()
+        status_card.setObjectName("groupCard")
+        status_card.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        status = QVBoxLayout(status_card)
+        status.setContentsMargins(12, 4, 12, 4)
+        status.setSpacing(0)
+        self.pill_output = StatusPill("Idle", "idle")
+        self.pill_min = StatusPill("—", "idle")
+        self.pill_cover = StatusPill("—", "idle")
+        for i, (label, pill) in enumerate((("Output", self.pill_output),
+                                           ("Window", self.pill_min),
+                                           ("Covered", self.pill_cover))):
+            if i:
+                status.addWidget(self._separator())
+            status.addWidget(self._status_row(label, pill))
+        ins.addWidget(status_card)
+        ins.addSpacing(8)
+
+        # audio
+        ins.addWidget(self._section("Audio"))
+        self.meter = LevelMeter()
+        self.meter.setMinimumWidth(200)
+        ins.addWidget(self.meter)
+        ins.addSpacing(8)
+
+        # capture type
+        ins.addWidget(self._section("Capture"))
+        self.capture_combo = QComboBox()
+        self.capture_combo.addItem("Window · covered mode", "window")
+        self.capture_combo.addItem("Game capture", "game")
+        self.capture_combo.setToolTip(
+            "Window + Modern WGC is the reliable default for a restored window "
+            "covered by another app. Game Capture is only for apps that support "
+            "OBS game hooks. Applies to the next recording.")
+        ins.addWidget(self.capture_combo)
+        self.capture_combo.currentIndexChanged.connect(self._emit_capture_source)
+        hint = QLabel("Keep the window restored. Covering it is fine; "
+                      "minimizing pauses the picture.")
+        hint.setObjectName("dimmed")
+        hint.setWordWrap(True)
+        ins.addSpacing(4)
+        ins.addWidget(hint)
+        ins.addStretch(1)
+
+        # pinned actions
+        footer = QWidget()
+        footer.setObjectName("inspectorFooter")
+        footer.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        foot = QVBoxLayout(footer)
+        foot.setContentsMargins(18, 12, 18, 16)
+        foot.setSpacing(8)
+        self.stop_btn = QPushButton("Stop && Save")
         self.stop_btn.setObjectName("danger")
-        self.stop_btn.setMinimumHeight(38)
+        self.stop_btn.setMinimumHeight(32)
         self.stop_btn.setEnabled(False)
-        controls.addWidget(self.stop_btn)
-        self.library_btn = QPushButton("View library")
+        foot.addWidget(self.stop_btn)
+        self.library_btn = QPushButton("Show Library")
         self.library_btn.clicked.connect(self.library_requested.emit)
-        controls.addWidget(self.library_btn)
-        controls.addStretch(1)
-        lay.addLayout(controls)
+        foot.addWidget(self.library_btn)
+        ins_outer.addWidget(footer)
         self.stop_btn.clicked.connect(self._on_stop_clicked)
 
         self._ui_timer = QTimer(self)
         self._ui_timer.setInterval(1000)
         self._ui_timer.timeout.connect(self._tick_label)
         self._ui_timer.start()
+
+    # -- building blocks ------------------------------------------------------ #
+
+    @staticmethod
+    def _section(text):
+        lbl = QLabel(text.upper())
+        lbl.setObjectName("sectionLabel")
+        return lbl
+
+    @staticmethod
+    def _separator():
+        line = QFrame()
+        line.setObjectName("hairline")
+        line.setFixedHeight(1)
+        return line
+
+    @staticmethod
+    def _status_row(label, pill):
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 7, 0, 7)
+        name = QLabel(label)
+        name.setObjectName("rowLabel")
+        lay.addWidget(name)
+        lay.addStretch(1)
+        lay.addWidget(pill)
+        return row
+
+    def _set_state(self, text):
+        self.state_label.setText(text)
 
     # -- API used by the main window ----------------------------------------- #
 
@@ -227,16 +331,11 @@ class LivePage(QWidget):
             self.add_feed("obs", "target app keeps rendering when covered "
                                 "— recording stays sharp")
             return
-        exe = (ev.get("exe") or "this app").lower()
-        if exe == "chrome.exe":
-            self.advice_label.setText(
-                "Chrome may throttle its own renderer when covered. WGC is "
-                "active, but this process needs safe launch flags. Prepare "
-                "Chrome for the next capture or use the isolated browser:")
-        else:
-            self.advice_label.setText(
-                f"{exe.replace('.exe', '')} stops drawing when another window "
-                f"covers it, so the recording freezes. Pick a fix:")
+        name = ev.get("app") or (ev.get("exe") or "this app").replace(".exe", "")
+        self.advice_label.setText(
+            f"<b>{name} may freeze while covered.</b><br>It stops drawing when "
+            "another window is on top. Make it recording-safe for your next "
+            "recording.")
         self.advice_box.show()
 
     def on_relocked(self, ev):
@@ -259,18 +358,17 @@ class LivePage(QWidget):
         self.preview.setText("Waiting for the first frame…")
         self.feed.clear()
         self.banner.hide()
-        self.result_label.hide()
-        for b in (self.open_file_btn, self.open_folder_btn):
-            b.hide()
+        self.result_box.hide()
+        self._set_state("Starting…")
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setText("Stop & save")
+        self.stop_btn.setText("Stop && Save")
         self.capture_combo.setEnabled(False)
         self.timer_label.setText("00:00:00")
         self.meter.set_enabled(False)
         self.meter.set_db(-100.0)
-        self.pill_output.set_state("idle", "output idle")
-        self.pill_min.set_state("idle", "window OK")
-        self.pill_cover.hide()
+        self.pill_output.set_state("idle", "Idle")
+        self.pill_min.set_state("idle", "—")
+        self.pill_cover.set_state("idle", "—")
         self.target_title.setText("—")
         self.target_meta.setText("PID —  •  HWND —")
         self.advice_box.hide()
@@ -282,32 +380,33 @@ class LivePage(QWidget):
         self._base_elapsed = 0.0
         self._base_time = time.time()
         self.stop_btn.setEnabled(True)
-        self.stop_btn.setText("Stop & save")
+        self.stop_btn.setText("Stop && Save")
+        self.rec_badge.show()
+        self._set_state("Recording")
         self._set_target(ev.get("window_title", ""), ev.get("pid", 0),
                          ev.get("hwnd", 0))
-        self.pill_output.set_state("rec", "output active")
-        self.pill_min.set_state("ok", "window OK")
+        self.pill_output.set_state("rec", "Recording")
+        self.pill_min.set_state("ok", "Visible")
+        self.pill_cover.set_state("idle", "No")
         self.add_feed("rec", f"Recording started — '{ev.get('name', '')}'")
 
     def on_tick(self, ev):
         self._base_elapsed = float(ev.get("elapsed", 0.0))
         self._base_time = time.time()
         if ev.get("output_active", True):
-            self.pill_output.set_state("rec", "output active")
+            self.pill_output.set_state("rec", "Recording")
         else:
-            self.pill_output.set_state("warn", "output restarting…")
+            self.pill_output.set_state("warn", "Restarting…")
         if ev.get("minimized"):
-            self.pill_min.set_state("warn", "minimized warning")
+            self.pill_min.set_state("warn", "Minimized")
         else:
-            self.pill_min.set_state("ok", "window OK")
+            self.pill_min.set_state("ok", "Visible")
         if ev.get("covered") and ev.get("capture_method") == 2:
-            self.pill_cover.set_state("ok", "covered · WGC active")
-            self.pill_cover.show()
+            self.pill_cover.set_state("ok", "Protected")
         elif ev.get("covered"):
-            self.pill_cover.set_state("warn", "covered · legacy capture")
-            self.pill_cover.show()
+            self.pill_cover.set_state("warn", "Legacy capture")
         else:
-            self.pill_cover.hide()
+            self.pill_cover.set_state("idle", "No")
         if ev.get("pinned_title"):
             self._set_target(ev["pinned_title"],
                              ev.get("pid", self._pid),
@@ -325,16 +424,18 @@ class LivePage(QWidget):
             self._hide_silence()
 
     def on_stopping(self, _ev):
+        self.rec_badge.hide()
+        self._set_state("Saving…")
         self.stop_btn.setEnabled(False)
         self.stop_btn.setText("Finalizing…")
-        self.pill_output.set_state("warn", "finalizing…")
+        self.pill_output.set_state("warn", "Finalizing…")
         self._hide_silence()
 
     def on_stopped(self, ev):
         self._running = False
         self.capture_combo.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setText("Stop & save")
+        self.stop_btn.setText("Stop && Save")
         self._last_path = ev.get("final_path") or ""
         if ev.get("timed_out"):
             self.banner.setText("File finalization timed out — the recording "
@@ -343,14 +444,15 @@ class LivePage(QWidget):
                                 f"{ev.get('src_path', '')}")
             self.banner.show()
         if self._last_path:
-            self.result_label.setText(f"Saved: {self._last_path}")
-            self.result_label.show()
-            self.open_file_btn.show()
-            self.open_folder_btn.show()
-        self.pill_output.set_state("idle", "output idle")
+            self.result_label.setText(f"Saved  {self._last_path}")
+            self.result_box.show()
+        self._set_state("Saved" if self._last_path else "Stopped")
+        self.pill_output.set_state("idle", "Idle")
 
     def on_aborted(self, reason):
         self._running = False
+        self.rec_badge.hide()
+        self._set_state("Not started")
         self.capture_combo.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.banner.setText(f"Recording aborted: {reason}")
@@ -358,25 +460,16 @@ class LivePage(QWidget):
 
     def on_error(self, text):
         self._running = False
+        self.rec_badge.hide()
+        self._set_state("Stopped")
         self.capture_combo.setEnabled(True)
         self.stop_btn.setEnabled(False)
-        self.stop_btn.setText("Stop & save")
+        self.stop_btn.setText("Stop && Save")
         self.banner.setText(f"Error: {text}")
         self.banner.show()
 
     def add_feed(self, source, text):
-        stamp = datetime.now().strftime("%H:%M:%S")
-        item = QListWidgetItem(f"{stamp}  [{source}] {text}")
-        if source == "error":
-            item.setForeground(QBrush(QColor(theme.ERR)))
-        elif "⚠" in text or "WARNING" in text.upper():
-            item.setForeground(QBrush(QColor(theme.WARN)))
-        elif "✔" in text:
-            item.setForeground(QBrush(QColor(theme.OK)))
-        self.feed.addItem(item)
-        while self.feed.count() > _MAX_FEED:
-            self.feed.takeItem(0)
-        self.feed.scrollToBottom()
+        self.feed.add(source, text, datetime.now().strftime("%H:%M:%S"))
 
     # -- live preview --------------------------------------------------------- #
 
@@ -455,11 +548,11 @@ class LivePage(QWidget):
             try:
                 open_file(self._last_path)
             except OSError as e:
-                QMessageBox.warning(self, "Open failed", str(e))
+                dialogs.error(self, "Could not open the recording", str(e))
 
     def _show_folder(self):
         if self._last_path:
             try:
                 show_in_explorer(self._last_path)
             except OSError as e:
-                QMessageBox.warning(self, "Explorer failed", str(e))
+                dialogs.error(self, "Could not show the file", str(e))

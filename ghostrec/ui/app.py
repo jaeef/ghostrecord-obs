@@ -1,10 +1,10 @@
-"""QApplication bootstrap: dark theme, single-instance guard, main window."""
+"""QApplication bootstrap: macOS-style theme, single-instance guard, main window."""
 
 import sys
 
 from PyQt6.QtCore import QCoreApplication
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
-from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtWidgets import QApplication
 
 from ghostrec.ui import branding, theme
 from ghostrec.ui.main_window import MainWindow
@@ -19,7 +19,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationDisplayName("GhostRec OBS")
     app.setWindowIcon(branding.app_icon())
-    theme.apply(app)
+    theme.apply(app, _saved_appearance())
 
     if _forward_to_existing_instance():
         return 0
@@ -31,10 +31,10 @@ def main():
     try:
         window = MainWindow()
     except (OSError, ValueError) as e:
-        QMessageBox.critical(
-            None, "GhostRec could not start",
-            f"Configuration error:\n\n{e}\n\n"
-            "Fix config.json or use Settings after recreating it.")
+        from ghostrec.ui import dialogs
+        dialogs.error(None, "GhostRec could not start",
+                      "config.json has an error. Fix it, or delete it to "
+                      "start with defaults.", detail=str(e))
         return 1
 
     def _on_new_connection():
@@ -48,6 +48,15 @@ def main():
     server.newConnection.connect(_on_new_connection)
     window.show()
     return app.exec()
+
+
+def _saved_appearance():
+    """Appearance preference from config.json, before the window exists."""
+    try:
+        from ghostrec.core import config as gcfg
+        return gcfg.load_config().get("ui", {}).get("appearance", "auto")
+    except Exception:
+        return "auto"
 
 
 def _forward_to_existing_instance():

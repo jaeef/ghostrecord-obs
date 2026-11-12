@@ -9,19 +9,19 @@ import copy
 import queue
 import threading
 
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import QEvent, Qt, QTimer
 from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QListWidget,
-                             QListWidgetItem, QMainWindow, QMessageBox,
+                             QListWidgetItem, QMainWindow,
                              QPushButton, QStackedWidget, QSystemTrayIcon,
                              QVBoxLayout, QWidget)
 
 from ghostrec.core import config as gcfg
-from ghostrec.core.apps import (is_throttle_prone, launch_record_chrome,
-                                relaunch_chrome_with_flags)
+from ghostrec.core import safe_apps
+from ghostrec.core.apps import launch_record_chrome
 from ghostrec.core.obs import (AudioWatcher, connect, launch_obs,
                                test_connection, wait_for_port)
 from ghostrec.core.recorder import RecorderSession
-from ghostrec.ui import branding
+from ghostrec.ui import branding, chrome, dialogs, theme
 from ghostrec.ui.pages.library import LibraryPage
 from ghostrec.ui.pages.live import LivePage
 from ghostrec.ui.pages.picker import PickerPage
@@ -32,17 +32,35 @@ from ghostrec.ui.widgets import StatusPill
 
 PAGE_PICKER, PAGE_LIVE, PAGE_LIBRARY, PAGE_SETTINGS = range(4)
 
+# (sidebar label, icon, toolbar title, toolbar subtitle)
+PAGES = (
+    ("Record", "record", "Record a window",
+     "Pick one restored window — only that window is captured"),
+    ("Live", "live", "Live session",
+     "Watch the capture while you keep working"),
+    ("Library", "library", "Recordings", "Finished files, newest first"),
+    ("Settings", "settings", "Settings",
+     "OBS connection, capture, output and appearance"),
+)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("GhostRec OBS")
         self.setWindowIcon(branding.app_icon())
-        self.resize(1180, 780)
-        self.setMinimumSize(980, 680)
-
         gcfg.ensure_config()
         self.cfg = gcfg.validate_config(gcfg.load_config())
+        self._native_frame = bool(self.cfg.get("ui", {}).get("native_frame"))
+        if not self._native_frame:
+            # macOS look: our own title bar with traffic lights
+            self.setWindowFlags(Qt.WindowType.Window
+                                | Qt.WindowType.FramelessWindowHint
+                                | Qt.WindowType.WindowSystemMenuHint
+                                | Qt.WindowType.WindowMinMaxButtonsHint)
+            self._resizer = chrome.FramelessResizer(self)
+        self.resize(1180, 780)
+        self.setMinimumSize(980, 680)
         self.req = None
         self.audio = None
         self.session = None
@@ -52,6 +70,7 @@ class MainWindow(QMainWindow):
         self._events = queue.Queue()
         self._manual_connect = False
         self._connect_generation = 0
+        self._previewing_appearance = False
 
         self._build_ui()
         self._build_tray()
@@ -75,87 +94,102 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Left sidebar container
-        sidebar_box = QVBoxLayout()
-        sidebar_box.setContentsMargins(0, 0, 0, 0)
-        sidebar_box.setSpacing(0)
+        # ---- sidebar (source list) ---------------------------------------
+        sidebar = chrome.DragRegion()
+        sidebar.setObjectName("sidebarPane")
+        sidebar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        sidebar.setFixedWidth(220)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(0, 0, 0, 0)
+        side.setSpacing(0)
 
-        brand_widget = QWidget()
-        brand_widget.setObjectName("brandPanel")
-        brand_lay = QVBoxLayout(brand_widget)
-        brand_lay.setContentsMargins(20, 20, 20, 18)
-        brand_lay.setSpacing(3)
+        lights_row = QHBoxLayout()
+        lights_row.setContentsMargins(14, 14, 14, 0)
+        self.lights = chrome.TrafficLights()
+        self.lights.close_clicked.connect(self.close)
+        self.lights.minimize_clicked.connect(self.showMinimized)
+        self.lights.zoom_clicked.connect(lambda: chrome.toggle_zoom(self))
+        self.lights.setVisible(not self._native_frame)
+        lights_row.addWidget(self.lights)
+        lights_row.addStretch(1)
+        side.addLayout(lights_row)
+        side.addSpacing(22)
 
-        brand_row = QHBoxLayout()
-        brand_row.setContentsMargins(0, 0, 0, 0)
-        brand_row.setSpacing(10)
-        brand_logo = QLabel()
-        brand_logo.setPixmap(branding.logo_pixmap(30))
-        brand_logo.setFixedSize(30, 30)
-        brand_logo.setStyleSheet("background: transparent;")
-        brand_logo.setToolTip("GhostRec OBS")
-
-        brand_text = QVBoxLayout()
-        brand_text.setContentsMargins(0, 0, 0, 0)
-        brand_text.setSpacing(1)
-        brand_lbl = QLabel("GhostRec")
-        brand_lbl.setObjectName("brandTitle")
-        sub_lbl = QLabel("Focused capture for OBS")
-        sub_lbl.setObjectName("brandSubtitle")
-        brand_text.addWidget(brand_lbl)
-        brand_text.addWidget(sub_lbl)
-
-        brand_row.addWidget(brand_logo)
-        brand_row.addLayout(brand_text)
-        brand_row.addStretch(1)
-        brand_lay.addLayout(brand_row)
-        sidebar_box.addWidget(brand_widget)
+        section = QLabel("GhostRec")
+        section.setObjectName("sidebarSection")
+        section_row = QHBoxLayout()
+        section_row.setContentsMargins(16, 0, 16, 4)
+        section_row.addWidget(section)
+        side.addLayout(section_row)
 
         self.nav = QListWidget()
         self.nav.setObjectName("sidebar")
-        self.nav.setFixedWidth(216)
-        for label in ("Record", "Live", "Library", "Settings"):
+        self.nav.setIconSize(chrome.ICON_SIZE)
+        self.nav.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.nav.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        for label, *_ in PAGES:
             self.nav.addItem(QListWidgetItem(label))
-        sidebar_box.addWidget(self.nav, 1)
+        self._refresh_nav_icons()
+        side.addWidget(self.nav, 1)
 
-        sidebar_footer = QWidget()
-        sidebar_footer.setObjectName("sidebarFooter")
-        footer_lay = QVBoxLayout(sidebar_footer)
-        footer_lay.setContentsMargins(20, 14, 20, 16)
-        footer_lay.setSpacing(3)
-        footer_title = QLabel("Window lock")
-        footer_title.setObjectName("sidebarHint")
-        footer_note = QLabel("One target • no desktop capture")
-        footer_note.setObjectName("sidebarHint")
-        footer_lay.addWidget(footer_title)
-        footer_lay.addWidget(footer_note)
-        sidebar_box.addWidget(sidebar_footer)
-        root.addLayout(sidebar_box)
+        footer = QWidget()
+        footer.setObjectName("sidebarFooter")
+        footer.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        footer_lay = QHBoxLayout(footer)
+        footer_lay.setContentsMargins(16, 10, 16, 14)
+        footer_lay.setSpacing(10)
+        brand_logo = QLabel()
+        brand_logo.setPixmap(branding.logo_pixmap(28))
+        brand_logo.setFixedSize(28, 28)
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(0)
+        brand_lbl = QLabel("GhostRec")
+        brand_lbl.setObjectName("brandTitle")
+        from ghostrec import __version__
+        sub_lbl = QLabel(f"Version {__version__} · for OBS")
+        sub_lbl.setObjectName("brandSubtitle")
+        brand_text.addWidget(brand_lbl)
+        brand_text.addWidget(sub_lbl)
+        footer_lay.addWidget(brand_logo)
+        footer_lay.addLayout(brand_text, 1)
+        side.addWidget(footer)
+        root.addWidget(sidebar)
 
-        right = QVBoxLayout()
-        right.setContentsMargins(28, 22, 28, 22)
-        right.setSpacing(18)
+        # ---- content: unified toolbar + pages ------------------------------
+        content = QWidget()
+        content.setObjectName("contentPane")
+        right = QVBoxLayout(content)
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(0)
 
-        header = QHBoxLayout()
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(12)
+        toolbar = chrome.DragRegion()
+        toolbar.setObjectName("toolbar")
+        toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        toolbar.setFixedHeight(56)
+        header = QHBoxLayout(toolbar)
+        header.setContentsMargins(22, 0, 16, 0)
+        header.setSpacing(10)
         header_text = QVBoxLayout()
-        header_text.setSpacing(2)
-        header_title = QLabel("Recording workspace")
-        header_title.setObjectName("headerTitle")
-        header_subtitle = QLabel("Capture one restored window while you work in another")
-        header_subtitle.setObjectName("headerSubtitle")
-        header_text.addWidget(header_title)
-        header_text.addWidget(header_subtitle)
+        header_text.setSpacing(0)
+        header_text.addStretch(1)
+        self.toolbar_title = QLabel(PAGES[0][2])
+        self.toolbar_title.setObjectName("toolbarTitle")
+        self.toolbar_subtitle = QLabel(PAGES[0][3])
+        self.toolbar_subtitle.setObjectName("toolbarSubtitle")
+        header_text.addWidget(self.toolbar_title)
+        header_text.addWidget(self.toolbar_subtitle)
+        header_text.addStretch(1)
         header.addLayout(header_text)
         header.addStretch(1)
         self.conn_pill = StatusPill("OBS offline", "err")
         self.connect_btn = QPushButton("Connect OBS")
-        self.connect_btn.setObjectName("secondary")
-        header.addWidget(self.conn_pill)
+        header.addWidget(self.conn_pill, 0, Qt.AlignmentFlag.AlignVCenter)
         header.addWidget(self.connect_btn)
-        right.addLayout(header)
+        right.addWidget(toolbar)
 
+        body = QVBoxLayout()
+        body.setContentsMargins(24, 18, 24, 20)
         self.stack = QStackedWidget()
         self.picker = PickerPage()
         self.live = LivePage()
@@ -163,8 +197,9 @@ class MainWindow(QMainWindow):
         self.settings = SettingsPage()
         for page in (self.picker, self.live, self.library, self.settings):
             self.stack.addWidget(page)
-        right.addWidget(self.stack, 1)
-        root.addLayout(right, 1)
+        body.addWidget(self.stack, 1)
+        right.addLayout(body, 1)
+        root.addWidget(content, 1)
         self.setCentralWidget(central)
 
         self.nav.currentRowChanged.connect(self._on_nav)
@@ -173,15 +208,22 @@ class MainWindow(QMainWindow):
         self.connect_btn.clicked.connect(self._on_connect_clicked)
         self.picker.record_requested.connect(self._start_recording)
         self.picker.chrome_requested.connect(self._launch_isolated_chrome)
+        self.picker.make_safe_requested.connect(self._make_safe)
+        self.picker.connect_requested.connect(
+            lambda: self._connect(manual=True))
         self.live.stop_requested.connect(self._stop_recording)
-        self.live.back_requested.connect(lambda: self._show_page(PAGE_PICKER))
         self.live.library_requested.connect(lambda: self._show_page(PAGE_LIBRARY))
         self.live.capture_source_requested.connect(self._set_capture_source)
-        self.live.record_chrome_requested.connect(self._relaunch_chrome)
+        self.live.record_chrome_requested.connect(self._make_session_app_safe)
         self.live.isolated_chrome_requested.connect(self._launch_isolated_chrome)
         self.settings.test_requested.connect(self._do_test_connection)
         self.settings.launch_obs_requested.connect(self._do_launch_obs)
         self.settings.save_requested.connect(self._save_settings)
+        self.settings.appearance_changed.connect(self._set_appearance)
+        hints = QApplication.instance().styleHints()
+        if hasattr(hints, "colorSchemeChanged"):
+            hints.colorSchemeChanged.connect(
+                lambda *_: self._set_appearance(None))
         self.settings.load_from(self.cfg)
         self.picker.set_output_dir(
             gcfg.resolve_output_folder(self.cfg, gcfg.REPO_ROOT))
@@ -197,10 +239,54 @@ class MainWindow(QMainWindow):
         self.tray = TrayIcon(self, on_stop=self._stop_recording,
                              on_quit=self._quit)
 
+    # -------------------------------------------------------- appearance -- #
+
+    def _refresh_nav_icons(self):
+        for i, (_, icon, *_rest) in enumerate(PAGES):
+            item = self.nav.item(i)
+            if item is not None:
+                item.setIcon(chrome.sidebar_icon(icon))
+
+    def _set_appearance(self, appearance):
+        """Re-theme the running app. None = re-resolve the saved preference."""
+        if appearance is None:
+            appearance = self.cfg.get("ui", {}).get("appearance", "auto")
+            if appearance != "auto":
+                return  # explicit choice ignores OS theme changes
+        saved = self.cfg.get("ui", {}).get("appearance", "auto")
+        self._previewing_appearance = appearance != saved
+        mode = theme.apply(QApplication.instance(), appearance)
+        self._refresh_nav_icons()
+        for pill in self.findChildren(StatusPill):
+            pill.restyle()
+        self.lights.update()
+        self.picker.restyle()
+        if not self._native_frame:
+            chrome.apply_native_effects(self, dark=(mode == "dark"))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not getattr(self, "_effects_applied", False):
+            self._effects_applied = True
+            if not self._native_frame:
+                chrome.apply_native_effects(self, dark=theme.is_dark())
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.ActivationChange and hasattr(
+                self, "lights"):
+            self.lights.update()  # gray traffic lights when inactive
+
     def _on_nav(self, row):
         if row < 0:
             return
         self.stack.setCurrentIndex(row)
+        self.toolbar_title.setText(PAGES[row][2])
+        self.toolbar_subtitle.setText(PAGES[row][3])
+        if row != PAGE_SETTINGS and self._previewing_appearance:
+            # leaving Settings without saving reverts an appearance preview
+            self._set_appearance(self.cfg.get("ui", {}).get("appearance",
+                                                            "auto"))
         if row == PAGE_LIBRARY:
             self.library.refresh()
         elif row == PAGE_SETTINGS:
@@ -262,6 +348,7 @@ class MainWindow(QMainWindow):
         self.req = req
         self.audio = watcher
         self.conn_pill.set_state("ok", f"OBS {ver} connected")
+        self.picker.set_obs_connected(True)
         self.connect_btn.setText("Disconnect")
         self.connect_btn.setEnabled(True)
         if audio_err:
@@ -272,17 +359,18 @@ class MainWindow(QMainWindow):
     def _handle_connect_failed(self, token, msg):
         if token != self._connect_generation:
             return
+        self.picker.set_obs_connected(False)
         self.conn_pill.set_state("err", "OBS offline")
         self.connect_btn.setText("Connect")
         self.connect_btn.setEnabled(True)
         self.conn_pill.setToolTip(msg)
         if self._manual_connect:
-            QMessageBox.warning(self, "Connection failed", msg)
+            dialogs.error(self, "Could not connect to OBS", msg)
 
     def _disconnect(self):
         if self.session and self.session.is_running:
-            QMessageBox.information(self, "Recording",
-                                    "Stop the recording first.")
+            dialogs.info(self, "Recording in progress",
+                         "Stop the recording before disconnecting from OBS.")
             return
         self._connect_generation += 1
         self._stop_preview()
@@ -297,6 +385,7 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
         self.req = None
+        self.picker.set_obs_connected(False)
         self.conn_pill.set_state("err", "OBS offline")
         self.conn_pill.setToolTip("")
         self.connect_btn.setText("Connect")
@@ -307,26 +396,27 @@ class MainWindow(QMainWindow):
         if self.session and self.session.is_running:
             return
         if self.req is None:
-            QMessageBox.warning(self, "Not connected",
-                                "Connect to OBS first (Connect button or "
-                                "Settings).")
+            dialogs.warn(self, "OBS is not connected",
+                         "Open OBS Studio, then click Connect in the toolbar.")
             return
-        if self._needs_browser_preflight(win):
-            answer = QMessageBox.question(
-                self,
-                "Prepare covered-window capture",
-                "This Chrome window is not running with anti-occlusion flags.\n\n"
-                "Modern WGC will isolate the window from other apps, but "
-                "Chrome itself may stop painting when fully covered. Restart "
-                "Chrome with recording-safe flags and restore its tabs before "
-                "you select the target again?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes,
-            )
-            if answer == QMessageBox.StandardButton.Yes:
-                self._restart_safe_browser_for_pick()
+        if self._needs_safe_preflight(win):
+            name = safe_apps.app_name(win.get("exe"))
+            choice = dialogs.alert(
+                self, f"{name} may freeze while covered",
+                f"{name} stops drawing when another window covers it, so the "
+                "recording would freeze. Restart it once in recording-safe "
+                "mode, then select its window again.",
+                [("Make Recording-Safe", "primary"),
+                 ("Record Anyway", "normal"),
+                 ("Cancel", "cancel")],
+                kind="warning")
+            if choice == "Make Recording-Safe":
+                self._make_safe(win)
+                return
+            if choice != "Record Anyway":
                 return
         out_dir = gcfg.resolve_output_folder(self.cfg, gcfg.REPO_ROOT)
+        self._session_win = dict(win)
         self.picker.set_busy(True)
         self.live.begin_session()
         self.session = RecorderSession(
@@ -336,23 +426,44 @@ class MainWindow(QMainWindow):
         self._start_preview()
         self._show_page(PAGE_LIVE)
 
-    def _needs_browser_preflight(self, win):
-        capture = self.cfg.get("capture", {})
-        if not capture.get("auto", True):
+    def _needs_safe_preflight(self, win):
+        if not self.cfg.get("capture", {}).get("auto", True):
             return False
-        exe = (win.get("exe") or "").lower()
-        return (exe == "chrome.exe" and is_throttle_prone(exe)
+        return (bool(safe_apps.app_kind(win.get("exe")))
                 and not win.get("record_friendly", False))
 
-    def _restart_safe_browser_for_pick(self):
+    def _make_safe(self, win, force=False):
+        """Restart the window's app in recording-safe mode (asks first)."""
+        if self.session and self.session.is_running:
+            dialogs.info(
+                self, "Recording in progress",
+                "Stop the recording first. Restarting the app would close "
+                "the window being recorded.")
+            return
+        if not force:
+            message, detail = safe_apps.describe_restart(win)
+            name = safe_apps.app_name(win.get("exe"))
+            if not dialogs.confirm(
+                    self, f"Restart {name} in recording-safe mode?", message,
+                    ok="Restart", detail=detail):
+                return
         self.picker.set_busy(True)
+        self.picker.start_btn.setText("Restarting app…")
 
         def work():
-            ok, msg = relaunch_chrome_with_flags()
-            self._events.put(("safe_browser_result", ok, msg))
+            try:
+                status, msg = safe_apps.make_recording_safe(win, force=force)
+            except Exception as e:
+                status, msg = "error", str(e)
+            self._events.put(("make_safe_result", status, msg, win))
 
-        threading.Thread(target=work, name="ghostrec-safe-browser",
+        threading.Thread(target=work, name="ghostrec-make-safe",
                          daemon=True).start()
+
+    def _make_session_app_safe(self):
+        win = getattr(self, "_session_win", None)
+        if win:
+            self._make_safe(win)
 
     def _start_preview(self):
         self._stop_preview()
@@ -461,18 +572,6 @@ class MainWindow(QMainWindow):
             self._events.put(("app_action", ok, msg))
         threading.Thread(target=work, daemon=True).start()
 
-    def _relaunch_chrome(self):
-        if self.session and self.session.is_running:
-            self.live.add_feed(
-                "apps", "cannot restart Chrome during recording; "
-                "use Isolated Chrome for the next recording")
-            return
-
-        def work():
-            ok, msg = relaunch_chrome_with_flags()
-            self._events.put(("app_action", ok, msg))
-        threading.Thread(target=work, daemon=True).start()
-
     # ------------------------------------------------------------ settings -- #
 
     def _do_test_connection(self, host, port, password):
@@ -502,7 +601,7 @@ class MainWindow(QMainWindow):
 
     def _save_settings(self, new_cfg):
         if self.session and self.session.is_running:
-            QMessageBox.information(
+            dialogs.info(
                 self, "Recording in progress",
                 "Stop the current recording before changing settings.")
             return
@@ -511,9 +610,10 @@ class MainWindow(QMainWindow):
             self.cfg = gcfg.validate_config(new_cfg)
             gcfg.save_config(self.cfg)
         except (OSError, ValueError) as e:
-            QMessageBox.warning(self, "Settings not saved", str(e))
+            dialogs.error(self, "Settings not saved", str(e))
             return
         self.settings.show_saved()
+        self._set_appearance(self.cfg.get("ui", {}).get("appearance", "auto"))
         self.library.set_folder(
             gcfg.resolve_output_folder(self.cfg, gcfg.REPO_ROOT))
         self.picker.set_output_dir(
@@ -551,17 +651,24 @@ class MainWindow(QMainWindow):
                 self.live.add_feed("apps", msg)
                 if self.tray:
                     self.tray.notify("GhostRec", msg, warn=not ok)
-            elif kind == "safe_browser_result":
-                ok, msg = item[1], item[2]
+            elif kind == "make_safe_result":
+                status, msg, win = item[1], item[2], item[3]
                 self.picker.set_busy(False)
-                self.picker.refresh()
-                if ok:
-                    QMessageBox.information(
-                        self, "Browser ready",
-                        f"{msg}\n\nSelect the restored Chrome window and "
-                        "start the recording again.")
+                if status == "needs_force":
+                    if dialogs.confirm(self, "Still running in the background",
+                                       msg, ok="Quit & Restart",
+                                       destructive=True, kind="warning"):
+                        self._make_safe(win, force=True)
+                    continue
+                if status == "done":
+                    self.live.add_feed("apps", msg)
+                    QTimer.singleShot(2500, self.picker.refresh)
+                    dialogs.info(self, "Ready to record", msg,
+                                 kind="success")
                 else:
-                    QMessageBox.warning(self, "Browser not prepared", msg)
+                    dialogs.error(self, "Could not make it recording-safe",
+                                  msg)
+                self.settings.refresh_webview2_state()
             elif kind == "preview":
                 if len(item) >= 3 and item[1] == getattr(
                         self, "_preview_generation", 0):
@@ -577,9 +684,9 @@ class MainWindow(QMainWindow):
         if self.session and self.session.is_running:
             if not self.tray:
                 self._show_page(PAGE_LIVE)
-                QMessageBox.information(
+                dialogs.info(
                     self, "Recording in progress",
-                    "Stop the recording before closing GhostRec; no system "
+                    "Stop the recording before closing GhostRec. No system "
                     "tray is available to keep it running.")
                 event.ignore()
                 return
@@ -595,9 +702,8 @@ class MainWindow(QMainWindow):
 
     def _quit(self):
         if self.session and self.session.is_running:
-            QMessageBox.information(self, "Recording in progress",
-                                    "Stop the recording first (Live page → "
-                                    "Stop & save).")
+            dialogs.info(self, "Recording in progress",
+                         "Stop the recording first (Live → Stop & Save).")
             return
         if self.audio:
             self.audio.stop()

@@ -124,6 +124,19 @@ def obs_window_value(w):
     return f"{_obs_escape(w['title'])}:{_obs_escape(w['cls'])}:{_obs_escape(w['exe'])}"
 
 
+def identical_windows(w):
+    """Other visible windows OBS cannot tell apart from ``w``.
+
+    OBS binds a capture source by 'title:class:exe', not by HWND. If another
+    window has the exact same triple (two "New Tab - Google Chrome" windows),
+    OBS may bind to whichever comes first in Z-order. The recorder warns about
+    this so the user can rename/close the twin before it matters.
+    """
+    value = obs_window_value(w)
+    return [o for o in list_windows()
+            if o["hwnd"] != w.get("hwnd") and obs_window_value(o) == value]
+
+
 def find_window_by_title(target):
     """Return first window dict whose title contains target (case-insensitive)."""
     target_lower = target.lower()
@@ -154,24 +167,3 @@ def is_window_covered(hwnd):
         return False
     return (a[0] < b[2] and b[0] < a[2]
             and a[1] < b[3] and b[1] < a[3])
-
-
-# --------------------------------------------------------------------------- #
-# Z-order (READ-ONLY)                                                                           #
-# --------------------------------------------------------------------------- #
-# GhostRec never raises windows above your work: pinning the recorded
-# window was removed at the user's request because it blocked normal use
-# of the desktop. Only a read-only check is kept, so the app can tell if
-# a window was pinned by the user themselves.
-GWL_EXSTYLE = -20
-WS_EX_TOPMOST = 0x00000008
-
-_user32 = ctypes.WinDLL("user32", use_last_error=True)
-_user32.GetWindowLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int]
-_user32.GetWindowLongPtrW.restype = ctypes.c_longlong
-
-
-def is_window_on_top(hwnd):
-    """Read-only: True when the window carries the TOPMOST flag."""
-    style = int(_user32.GetWindowLongPtrW(ctypes.c_void_p(hwnd), GWL_EXSTYLE))
-    return bool(style & WS_EX_TOPMOST)

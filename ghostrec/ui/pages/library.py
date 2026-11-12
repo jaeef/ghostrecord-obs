@@ -1,12 +1,14 @@
 """Recordings library page: list, details, open, show in folder, delete."""
 
+import html
 import os
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QAbstractItemView, QHBoxLayout, QHeaderView,
-                             QLabel, QMessageBox, QPushButton, QTableWidget,
+                             QLabel, QPushButton, QTableWidget,
                              QTableWidgetItem, QVBoxLayout, QWidget)
 
+from ghostrec.ui import dialogs
 from ghostrec.core.library import (delete_recording, human_size, open_file,
                                    scan_recordings, show_in_explorer)
 
@@ -24,9 +26,8 @@ class LibraryPage(QWidget):
         self._durations = {}  # normcase(path) -> seconds (this app run only)
 
         lay = QVBoxLayout(self)
-        title = QLabel("Recordings")
-        title.setObjectName("pageTitle")
-        lay.addWidget(title)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
         self.folder_label = QLabel("")
         self.folder_label.setObjectName("muted")
         lay.addWidget(self.folder_label)
@@ -40,6 +41,13 @@ class LibraryPage(QWidget):
             QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setDefaultSectionSize(30)
+        self.table.setShowGrid(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.table.horizontalHeader().setDefaultAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.table.horizontalHeader().setHighlightSections(False)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for col in (1, 2, 3):
@@ -47,6 +55,9 @@ class LibraryPage(QWidget):
                                         QHeaderView.ResizeMode.ResizeToContents)
         self.table.itemDoubleClicked.connect(lambda *_: self._open())
         self.table.itemSelectionChanged.connect(self._update_details)
+        # buttons used to update only on Refresh, so Play / Show / Recycle Bin
+        # stayed disabled after clicking a row
+        self.table.itemSelectionChanged.connect(self._update_buttons)
         lay.addWidget(self.table, 1)
 
         self.empty_label = QLabel("No recordings yet. Record a window and the "
@@ -65,10 +76,10 @@ class LibraryPage(QWidget):
 
         btns = QHBoxLayout()
         self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.setObjectName("accent")
         self.open_btn = QPushButton("Play")
-        self.folder_btn = QPushButton("Show in folder")
-        self.delete_btn = QPushButton("Delete")
+        self.folder_btn = QPushButton("Show in Folder")
+        self.delete_btn = QPushButton("Move to Recycle Bin")
+        self.delete_btn.setObjectName("danger")
         btns.addWidget(self.refresh_btn)
         btns.addStretch(1)
         btns.addWidget(self.open_btn)
@@ -132,9 +143,10 @@ class LibraryPage(QWidget):
     # -- internals ------------------------------------------------------------ #
 
     def _selected_path(self):
-        row = self.table.currentRow()
-        if row < 0:
+        rows = self.table.selectionModel().selectedRows()
+        if not rows:
             return ""
+        row = rows[0].row()
         item = self.table.item(row, 0)
         return (item.data(Qt.ItemDataRole.UserRole) or "") if item else ""
 
@@ -148,13 +160,14 @@ class LibraryPage(QWidget):
         if rec is None:
             self.details.setText(path)
             return
-        parts = [f"<b>{rec.name}{rec.ext}</b>",
-                 f"Recorded: {rec.display_date}",
-                 f"Size: {human_size(rec.size_bytes)}"]
+        esc = html.escape
+        parts = [f"<b>{esc(rec.name + rec.ext)}</b>",
+                 f"Recorded: {esc(rec.display_date)}",
+                 f"Size: {esc(human_size(rec.size_bytes))}"]
         dur = self._durations.get(os.path.normcase(path))
         if dur:
             parts.append(f"Duration: {_hms(dur)}")
-        parts.append(f"Path: {rec.path}")
+        parts.append(f"Path: {esc(rec.path)}")
         self.details.setText("<br>".join(parts))
 
     def _update_buttons(self):
@@ -168,7 +181,7 @@ class LibraryPage(QWidget):
             try:
                 open_file(path)
             except OSError as e:
-                QMessageBox.warning(self, "Open failed", str(e))
+                dialogs.error(self, "Could not open the recording", str(e))
 
     def _show_folder(self):
         path = self._selected_path()
@@ -176,18 +189,19 @@ class LibraryPage(QWidget):
             try:
                 show_in_explorer(path)
             except OSError as e:
-                QMessageBox.warning(self, "Explorer failed", str(e))
+                dialogs.error(self, "Could not show the file", str(e))
 
     def _delete(self):
         path = self._selected_path()
         if not path:
             return
-        answer = QMessageBox.question(
-            self, "Delete recording",
-            f"Delete this recording permanently?\n\n{os.path.basename(path)}")
-        if answer == QMessageBox.StandardButton.Yes:
+        if dialogs.confirm(
+                self, "Move to Recycle Bin?",
+                f"“{os.path.basename(path)}” can be restored from the "
+                "Recycle Bin.", ok="Move to Recycle Bin", destructive=True,
+                kind="warning"):
             try:
                 delete_recording(path)
             except OSError as e:
-                QMessageBox.warning(self, "Delete failed", str(e))
+                dialogs.error(self, "Could not move to Recycle Bin", str(e))
             self.refresh()

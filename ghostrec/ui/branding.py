@@ -34,7 +34,6 @@ MARK_MONO_SVG = ASSETS / "mark-mono.svg"
 TRAY_IDLE_SVG = ASSETS / "tray-idle.svg"  # plate mark without the REC dot
 
 REC_COLOR = "#FF453A"
-BADGE_EDGE = "#0A0B0F"
 
 # Sizes Windows asks for: tray (16-24), alt-tab (32), taskbar (48+).
 _TRAY_SIZES = (16, 20, 24, 32, 48, 64)

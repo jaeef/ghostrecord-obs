@@ -101,7 +101,7 @@ def test_connection(host, port, password, timeout=4):
 
 
 # --------------------------------------------------------------------------- #
-# OBS process helpers (from setup.py)                                          #
+# OBS process helpers (from configure.py)                                      #
 # --------------------------------------------------------------------------- #
 
 OBS_PATHS = [
@@ -110,6 +110,16 @@ OBS_PATHS = [
 ]
 
 WINDOW_CAPTURE_WGC = 2
+
+# OBS ``priority`` values (libobs window-helpers.h ``enum window_priority``):
+#   0 = CLASS  "Match title, otherwise find window of same type"
+#   1 = TITLE  "Window title must match"
+#   2 = EXE    "Match title, otherwise find window of same executable"
+# CLASS/EXE fall back to ANOTHER window of the same app when the title does not
+# match — e.g. a different Chrome window during a title change. That breaks the
+# "only this window" contract, so GhostRec always uses TITLE and re-aims the
+# source itself the moment the pinned window is renamed.
+WINDOW_PRIORITY_TITLE = 1
 
 
 def is_obs_running():
@@ -239,7 +249,7 @@ def ensure_scene_and_source(req, scene_name, source_name, log=None,
     else:
         _log(f"creating source '{source_name}' in '{scene_name}'")
         settings = ({"capture_mode": "window", "capture_cursor": True,
-                     "priority": 0}
+                     "priority": WINDOW_PRIORITY_TITLE}
                     if want_kind == "game_capture"
                     else {"method": int(method), "cursor": True,
                           "client_area": True})
@@ -267,18 +277,18 @@ def fit_source_to_canvas(req, scene_name, source_name, log=None):
 def point_source_at(req, source_name, window, method=2, kind="window"):
     """Aim the capture source at ONE exact window — never anything else.
 
-    We always pass the full 'title:class:exe' of the selected window, so OBS can
-    only ever bind to the window we selected — never to another window of the
-    same program. The caller re-points the source whenever the pinned window's
-    title changes.
+    We pass the full 'title:class:exe' of the selected window with the
+    "title must match" priority, so OBS never falls back to another window of
+    the same program. The caller re-points the source as soon as the pinned
+    window's title changes (see RecorderSession's fast pin watch).
     """
     from ghostrec.core.windows import obs_window_value
     value = obs_window_value(window)
     if source_kind_name(kind) == "game_capture":
         settings = {"capture_mode": "window", "window": value,
-                    "capture_cursor": True, "priority": 0}
+                    "capture_cursor": True, "priority": WINDOW_PRIORITY_TITLE}
     else:
-        settings = {"window": value, "priority": 0,
+        settings = {"window": value, "priority": WINDOW_PRIORITY_TITLE,
                     "method": int(method), "cursor": True,
                     # Client-area WGC avoids recording the outer frame while
                     # still reading the compositor surface when covered.
@@ -327,6 +337,9 @@ def check_scene_safety(req, scene_name, source_name=None, window=None,
         from ghostrec.core.windows import obs_window_value
         if settings.get("window") != obs_window_value(window):
             return False, "capture source no longer targets the selected window"
+        if int(settings.get("priority", -1)) !=                 WINDOW_PRIORITY_TITLE:
+            return False, ("capture source may fall back to another window "
+                           "(OBS match priority is not 'title must match')")
     return True, ""
 
 

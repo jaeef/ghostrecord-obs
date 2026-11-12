@@ -12,7 +12,7 @@ REQUIREMENTS = Path(__file__).parent / "requirements.txt"
 def install_deps():
     print("[setup] Checking dependencies...")
     try:
-        import obsws_python, win32gui
+        import obsws_python, win32gui  # noqa: F401  (availability check)
         print("[OK] Dependencies already installed.")
         return
     except ImportError:

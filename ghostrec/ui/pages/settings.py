@@ -2,39 +2,83 @@
 
 import copy
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
-                             QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-                             QLabel, QLineEdit, QPushButton, QSpinBox,
-                             QVBoxLayout, QWidget)
+                             QFileDialog, QFormLayout, QFrame, QGroupBox,
+                             QHBoxLayout, QLabel, QLineEdit, QPushButton,
+                             QScrollArea, QSpinBox, QVBoxLayout, QWidget)
+
+from ghostrec.ui import theme
+
+
+def _form(box):
+    """macOS-style form: right-aligned labels, roomy rows."""
+    form = QFormLayout(box)
+    form.setLabelAlignment(Qt.AlignmentFlag.AlignRight
+                           | Qt.AlignmentFlag.AlignVCenter)
+    form.setFieldGrowthPolicy(
+        QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+    form.setHorizontalSpacing(14)
+    form.setVerticalSpacing(10)
+    return form
 
 
 class SettingsPage(QWidget):
     test_requested = pyqtSignal(str, int, str)  # host, port, password
     launch_obs_requested = pyqtSignal(int)      # port
     save_requested = pyqtSignal(dict)           # full config dict
+    appearance_changed = pyqtSignal(str)        # "auto" | "light" | "dark"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cfg = {}
         self._loading = False
 
-        root = QVBoxLayout(self)
-        title = QLabel("Settings")
-        title.setObjectName("pageTitle")
-        root.addWidget(title)
-        subtitle = QLabel(
-            "Configure OBS, covered-window capture, output, and monitoring.")
-        subtitle.setObjectName("pageSubtitle")
-        root.addWidget(subtitle)
+        # The form is taller than the window: scroll it, keep Save visible.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(10)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inner = QWidget()
+        inner.setMaximumWidth(760)
+        root = QVBoxLayout(inner)
+        root.setContentsMargins(0, 0, 12, 0)
+        holder = QWidget()
+        holder_lay = QHBoxLayout(holder)
+        holder_lay.setContentsMargins(0, 0, 0, 0)
+        holder_lay.addStretch(1)
+        holder_lay.addWidget(inner, 100)
+        holder_lay.addStretch(1)
+        scroll.setWidget(holder)
+        outer.addWidget(scroll, 1)
+
+        # -- Appearance --------------------------------------------------------
+        look_box = QGroupBox("Appearance")
+        look_form = _form(look_box)
+        self.appearance_combo = QComboBox()
+        self.appearance_combo.addItem("Automatic (follow Windows)", "auto")
+        self.appearance_combo.addItem("Light", "light")
+        self.appearance_combo.addItem("Dark", "dark")
+        look_form.addRow("Appearance:", self.appearance_combo)
+        self.native_frame = QCheckBox(
+            "Use the standard Windows title bar (restart to apply)")
+        look_form.addRow("", self.native_frame)
+        root.addWidget(look_box)
+        self.appearance_combo.currentIndexChanged.connect(
+            self._emit_appearance)
 
         # -- OBS -------------------------------------------------------------
         obs_box = QGroupBox("OBS WebSocket")
-        form = QFormLayout(obs_box)
+        form = _form(obs_box)
         self.host_edit = QLineEdit()
         self.port_spin = QSpinBox()
         self.port_spin.setRange(1, 65535)
         password_row = QHBoxLayout()
+        password_row.setSpacing(8)
         self.pwd_edit = QLineEdit()
         self.pwd_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.show_pwd = QPushButton("Show")
@@ -48,7 +92,8 @@ class SettingsPage(QWidget):
         form.addRow("Password:", password_row)
 
         buttons = QHBoxLayout()
-        self.test_btn = QPushButton("Test connection")
+        buttons.setSpacing(8)
+        self.test_btn = QPushButton("Test Connection")
         self.launch_btn = QPushButton("Launch OBS")
         buttons.addWidget(self.test_btn)
         buttons.addWidget(self.launch_btn)
@@ -62,8 +107,8 @@ class SettingsPage(QWidget):
         root.addWidget(obs_box)
 
         # -- Scene & source ---------------------------------------------------
-        scene_box = QGroupBox("Scene & source configuration")
-        scene_form = QFormLayout(scene_box)
+        scene_box = QGroupBox("Scene && source")
+        scene_form = _form(scene_box)
         self.scene_edit = QLineEdit()
         self.source_edit = QLineEdit()
         scene_form.addRow("Scene name:", self.scene_edit)
@@ -78,7 +123,7 @@ class SettingsPage(QWidget):
 
         # -- Capture ---------------------------------------------------------------
         cap_box = QGroupBox("Capture")
-        cap_form = QFormLayout(cap_box)
+        cap_form = _form(cap_box)
         self.source_combo = QComboBox()
         self.source_combo.addItem(
             "Window Capture — Modern WGC for covered windows", "window")
@@ -112,12 +157,22 @@ class SettingsPage(QWidget):
         auto_hint.setObjectName("muted")
         auto_hint.setWordWrap(True)
         cap_form.addRow("", auto_hint)
+        wv_row = QHBoxLayout()
+        self.webview_label = QLabel("")
+        self.webview_label.setObjectName("muted")
+        self.webview_label.setWordWrap(True)
+        self.webview_btn = QPushButton("Remove")
+        self.webview_btn.clicked.connect(self._clear_webview2)
+        wv_row.addWidget(self.webview_label, 1)
+        wv_row.addWidget(self.webview_btn)
+        cap_form.addRow("Teams / WebView2:", wv_row)
         root.addWidget(cap_box)
 
         # -- Output ----------------------------------------------------------
         out_box = QGroupBox("Output")
-        out_form = QFormLayout(out_box)
+        out_form = _form(out_box)
         folder_row = QHBoxLayout()
+        folder_row.setSpacing(8)
         self.folder_edit = QLineEdit()
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse_folder)
@@ -132,7 +187,7 @@ class SettingsPage(QWidget):
 
         # -- Audio -----------------------------------------------------------
         audio_box = QGroupBox("Audio monitoring")
-        audio_form = QFormLayout(audio_box)
+        audio_form = _form(audio_box)
         self.audio_check = QCheckBox("Warn when the sound goes silent")
         audio_form.addRow(self.audio_check)
         self.input_edit = QLineEdit()
@@ -153,17 +208,18 @@ class SettingsPage(QWidget):
         audio_form.addRow("Warn after minimized for:", self.minimize_secs)
         root.addWidget(audio_box)
 
-        # -- Save ------------------------------------------------------------
+        root.addStretch(1)
+
+        # -- Save (pinned under the scroll area) --------------------------------
         save_row = QHBoxLayout()
-        self.save_btn = QPushButton("Save settings")
-        self.save_btn.setObjectName("primary")
-        save_row.addWidget(self.save_btn)
         self.saved_label = QLabel("")
         self.saved_label.setObjectName("muted")
-        save_row.addWidget(self.saved_label)
         save_row.addStretch(1)
-        root.addLayout(save_row)
-        root.addStretch(1)
+        save_row.addWidget(self.saved_label)
+        self.save_btn = QPushButton("Save Settings")
+        self.save_btn.setObjectName("primary")
+        save_row.addWidget(self.save_btn)
+        outer.addLayout(save_row)
 
         self.test_btn.clicked.connect(self._emit_test)
         self.launch_btn.clicked.connect(
@@ -196,6 +252,11 @@ class SettingsPage(QWidget):
         self.silence_db.setValue(float(audio.get("silence_db", -55.0)))
         self.silence_secs.setValue(int(audio.get("silence_alert_seconds", 30)))
         self.minimize_secs.setValue(int(audio.get("minimize_warn_seconds", 60)))
+        ui = cfg.get("ui", {})
+        idx = self.appearance_combo.findData(ui.get("appearance", "auto"))
+        self.appearance_combo.setCurrentIndex(max(0, idx))
+        self.native_frame.setChecked(bool(ui.get("native_frame", False)))
+        self.refresh_webview2_state()
         self._loading = False
 
     def collect(self):
@@ -222,15 +283,18 @@ class SettingsPage(QWidget):
         audio["silence_db"] = float(self.silence_db.value())
         audio["silence_alert_seconds"] = int(self.silence_secs.value())
         audio["minimize_warn_seconds"] = int(self.minimize_secs.value())
+        ui = cfg.setdefault("ui", {})
+        ui["appearance"] = self.appearance_combo.currentData() or "auto"
+        ui["native_frame"] = bool(self.native_frame.isChecked())
         return cfg
 
     def show_test_result(self, ok, msg):
-        color = "#3fb950" if ok else "#f85149"
+        color = theme.OK if ok else theme.ERR
         self.test_label.setStyleSheet(f"color: {color};")
         self.test_label.setText(f"{'✔' if ok else '✖'} {msg}")
 
     def show_launch_result(self, ok, msg):
-        color = "#3fb950" if ok else "#f85149"
+        color = theme.OK if ok else theme.ERR
         self.test_label.setStyleSheet(f"color: {color};")
         self.test_label.setText(f"{'✔' if ok else '✖'} {msg}")
 
@@ -238,6 +302,30 @@ class SettingsPage(QWidget):
         self.saved_label.setText("Saved.")
 
     # -- internals ------------------------------------------------------------ #
+
+    def refresh_webview2_state(self):
+        from ghostrec.core.safe_apps import webview2_setting_active
+        active = webview2_setting_active()
+        self.webview_label.setText(
+            "Recording-safe setting is ON for WebView2 apps (new Teams). "
+            "Restart those apps after removing it." if active else
+            "Off. Turned on by “Make recording-safe” for new Teams.")
+        self.webview_btn.setEnabled(active)
+
+    def _clear_webview2(self):
+        from ghostrec.core.safe_apps import clear_webview2_setting
+        try:
+            clear_webview2_setting()
+        except OSError as e:
+            self.webview_label.setText(f"Could not remove it: {e}")
+            return
+        self.refresh_webview2_state()
+
+    def _emit_appearance(self, *_):
+        if not self._loading:
+            # live preview; persisted with "Save Settings"
+            self.appearance_changed.emit(
+                self.appearance_combo.currentData() or "auto")
 
     def _toggle_pwd(self, show):
         self.pwd_edit.setEchoMode(QLineEdit.EchoMode.Normal if show

@@ -43,6 +43,12 @@ DEFAULT_CONFIG = {
         "silence_alert_seconds": 30,
         "minimize_warn_seconds": 60,
     },
+    "ui": {
+        # "auto" follows the OS light/dark setting
+        "appearance": "auto",
+        # true = keep the Windows title bar instead of macOS traffic lights
+        "native_frame": False,
+    },
 }
 
 
@@ -152,6 +158,16 @@ def validate_config(cfg):
                 or not math.isfinite(float(audio[key]))
                 or audio[key] <= 0):
             raise ValueError(f"Config key 'audio.{key}' must be greater than zero")
+
+    ui = cfg.setdefault("ui", {})
+    if not isinstance(ui, dict):
+        raise ValueError("Config key 'ui' must be an object")
+    ui.setdefault("appearance", "auto")
+    ui.setdefault("native_frame", False)
+    if ui["appearance"] not in ("auto", "light", "dark"):
+        raise ValueError("Config key 'ui.appearance' must be auto, light or dark")
+    if not isinstance(ui["native_frame"], bool):
+        raise ValueError("Config key 'ui.native_frame' must be boolean")
 
     obs = cfg.get("obs", {})
     obs.setdefault("host", "127.0.0.1")

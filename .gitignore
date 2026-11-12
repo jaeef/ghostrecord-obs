@@ -1,31 +1,48 @@
+# --- Python -----------------------------------------------------------------
 __pycache__/
 *.py[cod]
-.claude/
-
-# user data
-config.json
-recordings/
-run_log.txt
-run_err.txt
-
-# docs kept local
-FUTURE.md
-ghostrec-desktop-app.md
-workngtree.md
-
-# local test scratch, not tracked
-tests/
-
-# generated images, except tracked app assets
-*.png
-!ghostrec/ui/assets/*.png
-
-# build / packaging / tooling
-build/
-dist/
 *.egg-info/
 .venv/
 venv/
+env/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
+
+# --- build / packaging --------------------------------------------------------
+build/
+dist/
+*.spec
+
+# --- user data (never commit) -------------------------------------------------
+config.json
+.env
+recordings/
+*.mkv
+*.mp4
+*.mov
+*.flv
+run_log.txt
+run_err.txt
+*.log
+
+# --- local notes and scratch ----------------------------------------------------
+FUTURE.md
+ghostrec-desktop-app.md
+workngtree.md
+tests/
+
+# --- generated images, except tracked app assets ------------------------------
+*.png
+!ghostrec/ui/assets/*.png
+
+# --- editors / OS / tooling -----------------------------------------------------
+.claude/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

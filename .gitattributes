@@ -1,0 +1,11 @@
+# Normalize line endings in the repository (LF); Windows checkouts convert
+# per core.autocrlf. Batch files must keep CRLF to run reliably in cmd.exe.
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.svg text eol=lf
+*.txt text eol=lf
+*.bat text eol=crlf
+*.ico binary
+*.png binary

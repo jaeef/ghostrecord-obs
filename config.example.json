@@ -20,5 +20,9 @@
     "silence_db": -55.0,
     "silence_alert_seconds": 30,
     "minimize_warn_seconds": 60
+  },
+  "ui": {
+    "appearance": "auto",
+    "native_frame": false
   }
 }

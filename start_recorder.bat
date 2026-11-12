@@ -28,7 +28,7 @@ set "PYTHONUTF8=1"
 
 rem --- setup (dependencies + config) -------------------------------------------
 echo [i] Running setup (checks deps, config, OBS connection)...
-%PY% setup.py
+%PY% configure.py
 if errorlevel 1 (
     echo [!] Setup failed. Please check output above.
     pause
