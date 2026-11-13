@@ -70,8 +70,9 @@ def write_checksums():
         if f.is_file() and f.suffix in (".exe", ".zip"):
             digest = hashlib.sha256(f.read_bytes()).hexdigest()
             lines.append(f"{digest}  {f.name}")
+    # LF endings so `sha256sum -c` works too, not only Get-FileHash
     (DIST / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n",
-                                         encoding="utf-8")
+                                         encoding="utf-8", newline="\n")
     print("[build] " + str(DIST / "SHA256SUMS.txt"))
 
 
