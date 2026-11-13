@@ -131,3 +131,20 @@ def test_webview2_setting_roundtrip():
         assert not safe_apps.webview2_setting_active(name)
     finally:
         safe_apps.clear_webview2_setting(name)
+
+
+def test_installed_app_keeps_data_out_of_its_install_dir(monkeypatch, tmp_path):
+    import importlib
+    import sys as _sys
+    monkeypatch.setattr(_sys, "frozen", True, raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    cfg_mod = importlib.reload(gcfg)
+    try:
+        assert cfg_mod.APP_DIR == tmp_path / "GhostRec"
+        cfg_mod.ensure_config()
+        saved = cfg_mod.load_config()
+        assert saved["output_folder"].endswith("GhostRec")
+        assert "Videos" in saved["output_folder"]
+    finally:
+        monkeypatch.delattr(_sys, "frozen", raising=False)
+        importlib.reload(gcfg)

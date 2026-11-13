@@ -1,20 +1,26 @@
 """Configuration handling for GhostRec — shared by the CLI and the GUI.
 
-The config file lives at the repo root (the same config.json the CLI has
-always used). The schema is frozen; unknown keys are preserved on save so
-future sections (see FUTURE.md) survive a round-trip through the app.
+Running from source, config.json lives at the repo root (as it always has).
+The installed app (PyInstaller build) can't write next to its code, so it
+keeps config.json in %APPDATA%\\GhostRec and records to Videos\\GhostRec.
+Unknown keys are preserved on save.
 """
 
 import json
 import math
 import os
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_PATH = REPO_ROOT / "config.json"
-EXAMPLE_PATH = REPO_ROOT / "config.example.json"
+FROZEN = bool(getattr(sys, "frozen", False))      # installed .exe build
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+# where config.json lives and relative output folders resolve
+APP_DIR = (Path(os.environ.get("APPDATA") or Path.home()) / "GhostRec"
+           if FROZEN else SOURCE_ROOT)
+CONFIG_PATH = APP_DIR / "config.json"
+EXAMPLE_PATH = SOURCE_ROOT / "config.example.json"
 
 DEFAULT_CONFIG = {
     "obs": {"host": "127.0.0.1", "port": 4455, "password": ""},
@@ -54,6 +60,12 @@ def ensure_config():
     """Create config.json if missing. Returns a status message, or None."""
     if CONFIG_PATH.exists():
         return None
+    APP_DIR.mkdir(parents=True, exist_ok=True)
+    if FROZEN:
+        cfg = json.loads(json.dumps(DEFAULT_CONFIG))
+        cfg["output_folder"] = str(Path.home() / "Videos" / "GhostRec")
+        save_config(cfg)
+        return f"created {CONFIG_PATH}"
     if EXAMPLE_PATH.exists():
         shutil.copy(EXAMPLE_PATH, CONFIG_PATH)
         return f"created {CONFIG_PATH} from example"

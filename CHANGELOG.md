@@ -2,7 +2,7 @@
 
 All notable changes to GhostRec OBS. Dates are release dates (YYYY-MM-DD).
 
-## [Unreleased]
+## [1.3.0] - 2026-11-13
 
 ### Changed
 - Windows 11 look instead of macOS: native title bar (recolored to match),
@@ -13,6 +13,11 @@ All notable changes to GhostRec OBS. Dates are release dates (YYYY-MM-DD).
 - Record page cards fill the row (as many columns as fit), titles wrap to two
   readable lines, and app logos come from the window itself (Store apps too).
 - GhostRec shows its own logo in the taskbar instead of Python's.
+
+### Added
+- Windows installer (`GhostRec-Setup-<version>.exe`) and portable zip, built
+  by `packaging/build.py` and published on every `v*` tag. The installed app
+  keeps settings in `%APPDATA%\GhostRec` and records to `Videos\GhostRec`.
 
 ### Removed
 - Traffic-light window controls and the `ui.native_frame` setting.

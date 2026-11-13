@@ -82,14 +82,26 @@ own work stay out of the video.
 
 ## Installation
 
-### One-click (recommended)
+### Download (recommended — no Python needed)
+
+1. Go to **[Releases](https://github.com/jaeef/ghostrecord-obs/releases/latest)**
+   and download **`GhostRec-Setup-<version>.exe`**.
+2. Run it. It installs for your user only (no admin prompt) and adds a Start
+   menu and desktop shortcut.
+3. In OBS: **Tools → WebSocket Server Settings → Enable**, copy the password.
+4. In GhostRec: **Settings → OBS WebSocket**, paste it, **Test Connection**.
+
+Prefer no installer? Download `GhostRec-<version>-portable.zip`, unzip,
+run `GhostRec.exe`. Settings live in `%APPDATA%\GhostRec`, recordings in
+`Videos\GhostRec`; uninstalling keeps both.
+
+### From source (one click)
 
 1. Clone the repository
 2. Double-click `start_gui.bat`
 
 The launcher checks Python, installs dependencies on first run, creates
-`config.json`, and starts the app. Enter your OBS WebSocket password in
-**Settings** and click **Test Connection**.
+`config.json`, and starts the app.
 
 ### Manual
 
@@ -321,8 +333,9 @@ ghostrec-obs/
 │       ├── widgets.py         #   reusable widgets
 │       ├── preview.py         #   live preview worker
 │       └── tray.py            #   system tray
+├── packaging/                 # build.py (PyInstaller) + installer.iss
 ├── tests/                     # pytest suite (fake OBS, offscreen Qt)
-├── .github/workflows/         # CI: tests on Windows
+├── .github/workflows/         # CI: tests; release installer on v* tags
 ├── config.example.json        # Config template
 ├── pyproject.toml             # Metadata, dependencies, commands
 ├── requirements.txt           # Runtime dependencies
@@ -359,6 +372,9 @@ ghostrec-obs/
 
 - Test both front-ends against a real OBS instance for capture changes.
 - See [CHANGELOG.md](CHANGELOG.md) for release notes.
+- Build the installer locally with `python packaging/build.py` (needs
+  `pip install pyinstaller`, plus [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+  for the Setup.exe). Pushing a `v*` tag builds and publishes it in CI.
 - Open an issue for bugs or feature requests; PRs are welcome.
 
 ---

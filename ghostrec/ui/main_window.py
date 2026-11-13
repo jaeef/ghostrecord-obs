@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
         self._drain.start()
 
         self.library.set_folder(
-            gcfg.resolve_output_folder(self.cfg, gcfg.REPO_ROOT))
+            gcfg.resolve_output_folder(self.cfg, gcfg.APP_DIR))
 
         QTimer.singleShot(250, lambda: self._connect(manual=False))
 
@@ -209,7 +209,7 @@ class MainWindow(QMainWindow):
                 lambda *_: self._set_appearance(None))
         self.settings.load_from(self.cfg)
         self.picker.set_output_dir(
-            gcfg.resolve_output_folder(self.cfg, gcfg.REPO_ROOT))
+            gcfg.resolve_output_folder(self.cfg, gcfg.APP_DIR))
         self.live.set_capture_source(self.cfg.get("capture", {}).get(
             "source", "window"))
         self.live.set_silence_limit(self.cfg.get("audio", {}).get(
@@ -407,7 +407,7 @@ class MainWindow(QMainWindow):
                 return
             if choice != "Record Anyway":
                 return
-        out_dir = gcfg.resolve_output_folder(self.cfg, gcfg.REPO_ROOT)
+        out_dir = gcfg.resolve_output_folder(self.cfg, gcfg.APP_DIR)
         self._session_win = dict(win)
         self.picker.set_busy(True)
         self.live.begin_session()
@@ -611,9 +611,9 @@ class MainWindow(QMainWindow):
         self.settings.show_saved()
         self._set_appearance(self.cfg.get("ui", {}).get("appearance", "auto"))
         self.library.set_folder(
-            gcfg.resolve_output_folder(self.cfg, gcfg.REPO_ROOT))
+            gcfg.resolve_output_folder(self.cfg, gcfg.APP_DIR))
         self.picker.set_output_dir(
-            gcfg.resolve_output_folder(self.cfg, gcfg.REPO_ROOT))
+            gcfg.resolve_output_folder(self.cfg, gcfg.APP_DIR))
         self.live.set_capture_source(self.cfg.get("capture", {}).get(
             "source", "window"))
         self.live.set_silence_limit(self.cfg.get("audio", {}).get(

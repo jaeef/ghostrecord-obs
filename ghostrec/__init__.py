@@ -5,4 +5,4 @@ Package layout:
   ghostrec.ui    — PyQt6 desktop app
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
