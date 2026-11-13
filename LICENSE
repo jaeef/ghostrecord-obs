@@ -1,0 +1,36 @@
+GhostRec OBS
+Copyright (c) 2026 jaeef. All rights reserved.
+
+This software, including its source code, binaries, installers, icons and
+documentation (the "Software"), is the property of the copyright holder.
+
+Permitted use
+- You may download the official release builds published at
+  https://github.com/jaeef/ghostrecord-obs/releases and install and use them
+  on your own computers.
+- You may view the source code on GitHub.
+
+Not permitted without prior written permission from the copyright holder
+- Copying, modifying, merging, publishing or distributing the Software or
+  any part of it, in source or binary form.
+- Creating derivative works based on the Software.
+- Selling, sublicensing, renting or offering the Software as a service.
+- Removing or altering this notice or any copyright notice in the Software.
+
+Contributions
+Any contribution you submit (for example a pull request) is accepted only if
+you agree that the copyright holder may use it under these same terms.
+
+No warranty
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+You are responsible for complying with the laws that apply to recording, and
+for obtaining any consent required before recording meetings, classes or other
+people.
+
+For permission requests, open an issue at
+https://github.com/jaeef/ghostrecord-obs/issues

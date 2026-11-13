@@ -13,9 +13,11 @@ you close it.
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![OBS Studio 28+](https://img.shields.io/badge/OBS%20Studio-28%2B-302E33?style=flat-square&logo=obsstudio&logoColor=white)](https://obsproject.com/)
 [![Windows 10 / 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows11&logoColor=white)](https://www.microsoft.com/windows)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-2ea44f?style=flat-square)](https://github.com/jaeef/ghostrecord-obs/pulls)
+[![License: All rights reserved](https://img.shields.io/badge/License-All%20rights%20reserved-555555?style=flat-square)](LICENSE)
 
 **Pick a window → Record → Close to stop → Done.**
+
+[![Download for Windows](https://img.shields.io/github/v/release/jaeef/ghostrecord-obs?label=Download%20for%20Windows&style=for-the-badge&logo=windows11&color=f6a15b)](https://github.com/jaeef/ghostrecord-obs/releases/latest)
 
 </div>
 
@@ -45,9 +47,10 @@ Its "match by exe" fallback can drift to another window as soon as a title
 changes — a Teams call renames itself mid-meeting and the recording jumps
 windows, or stops matching entirely.
 
-GhostRec removes that guesswork: the window is bound by **HWND**, which never
-changes while the window lives. Recording continues through any title change and
-ends exactly when the window closes.
+GhostRec removes that guesswork: it tracks the window by its **HWND**, which
+never changes while the window lives, and keeps OBS locked to that exact window
+with *title must match*, re-aiming within a quarter second of any title change.
+Recording continues through renames and ends exactly when the window closes.
 
 You also never capture your whole screen. Other apps, notifications and your
 own work stay out of the video.
@@ -74,7 +77,7 @@ own work stay out of the video.
 ## Requirements
 
 - **Windows** 10 or 11 (uses Win32 APIs: `win32gui`, `win32process`)
-- **Python** 3.10+
+- **Python** 3.10+ — only to run from source; the installer needs no Python
 - **OBS Studio** 28+ with the WebSocket server enabled (Tools → WebSocket Server Settings)
 - OBS must stay open while recording — minimized is fine, closed is not
 
@@ -90,6 +93,11 @@ own work stay out of the video.
    menu and desktop shortcut.
 3. In OBS: **Tools → WebSocket Server Settings → Enable**, copy the password.
 4. In GhostRec: **Settings → OBS WebSocket**, paste it, **Test Connection**.
+
+**"Windows protected your PC"?** The installer isn't code-signed yet, so
+SmartScreen warns on new downloads. Click **More info → Run anyway**. To
+verify the file, compare `Get-FileHash .\GhostRec-Setup-<version>.exe` in
+PowerShell with the SHA-256 listed on the release page.
 
 Prefer no installer? Download `GhostRec-<version>-portable.zip`, unzip,
 run `GhostRec.exe`. Settings live in `%APPDATA%\GhostRec`, recordings in
@@ -127,7 +135,9 @@ to your PATH.
 ## Quick start
 
 1. Open **OBS Studio** and leave it running.
-2. Launch GhostRec (`start_gui.bat` or `python app.py`).
+2. Launch GhostRec (Start menu → **GhostRec**, or from source `start_gui.bat`).
+   First time only: paste the OBS WebSocket password in **Settings** and click
+   **Test Connection**.
 3. Pick a window from the list, type a file name, press **Start Recording**.
 4. Close the window when you are done — the recording saves automatically and
    the picker comes back for the next one.
@@ -146,7 +156,7 @@ header if OBS was started afterwards.
 | **Record** | Gallery of open windows with live thumbnails, search and All / Browsers / Apps filters. A "Ready to record" panel shows the selected window, a checklist (OBS connected, window restored, keeps drawing when covered — with one-click **Connect** / **Fix**), the file name and the Start Recording button. |
 | **Live** | Live preview, timer with REC badge, target, status rows (output, window, covered), audio meter, capture-source switch, warnings with one-click fixes, and a filterable activity log (All / Warnings / Errors, Copy, Clear). Stop & Save stays pinned. |
 | **Library** | Table of recordings (name, date, size, format), details pane, Play, Show in Folder, Move to Recycle Bin. |
-| **Settings** | Appearance (auto / light / dark, native title bar), OBS host/port/password, Test Connection, Launch OBS, scene/source names, capture method and source, Teams/WebView2 recording-safe setting (with Remove), output folder, audio thresholds. |
+| **Settings** | Appearance (auto / light / dark), OBS host/port/password, Test Connection, Launch OBS, scene/source names, capture method and source, Teams/WebView2 recording-safe setting (with Remove), output folder, audio thresholds. |
 
 Closing the window while a recording is running keeps GhostRec in the tray
 instead of killing the session. Use the tray menu to stop or quit.
@@ -284,12 +294,12 @@ password.
 | Symptom | Fix |
 |---------|-----|
 | Recording is black or empty (Intel iGPU) | Window Capture needs a GPU-disabled browser on these machines. Start Chrome with `--disable-gpu` (separate profile via `--user-data-dir`), join in that window, then record it. Avoid the Teams desktop app. |
-| Another window covers the target | Keep the target restored, enable **Covered-window protection**, and use Window Capture + Modern WGC. GhostRec captures the target surface, not the topmost browser. If the target is Chrome/Edge/Electron and its own content stops updating, use the recording-safe browser launcher; capture cannot force an app to render frames it throttles itself. |
+| Another window covers the target | Keep the target restored, enable **Covered-window protection**, and use Window Capture + Modern WGC. GhostRec captures the target surface, not the topmost browser. If the target is Chrome/Edge/Electron/Teams and its content stops updating while covered, select it and click **Make Recording-Safe** (one restart), or use **Open Safe Browser**; capture cannot force an app to render frames it throttles itself. |
 | Recording freezes when the window is minimized | Restore the window. Minimized windows produce no frames — GhostRec warns after `audio.minimize_warn_seconds`. |
 | `Connection failed` | OBS WebSocket server must be enabled, port `4455`, password identical to `config.json`. Use **Test Connection** in Settings. |
 | File finalization timed out | OBS is still writing. Leave OBS open and check its own recording folder; large files take longer to close. |
 | No audio in the recording | Check the OBS audio input name matches `audio.input_name`, and that Desktop Audio is not muted. |
-| Wrong save location | Remember relative `output_folder` resolves against the repo root (GUI) or current directory (CLI). |
+| Wrong save location | The installed app saves to `Videos\GhostRec` by default; change it in **Settings → Output**. From source, a relative `output_folder` resolves against the repo root (GUI) or current directory (CLI). |
 
 ---
 
@@ -342,6 +352,7 @@ ghostrec-obs/
 ├── requirements-dev.txt       # + pytest
 ├── start_gui.bat              # One-click launcher
 ├── CHANGELOG.md
+├── LICENSE                    # All rights reserved
 └── README.md
 ```
 
@@ -375,7 +386,16 @@ ghostrec-obs/
 - Build the installer locally with `python packaging/build.py` (needs
   `pip install pyinstaller`, plus [Inno Setup 6](https://jrsoftware.org/isinfo.php)
   for the Setup.exe). Pushing a `v*` tag builds and publishes it in CI.
-- Open an issue for bugs or feature requests; PRs are welcome.
+- Open an issue for bugs or feature requests. Pull requests are accepted
+  under the terms in [LICENSE](LICENSE).
+
+---
+
+## License
+
+Copyright (c) 2026 jaeef. **All rights reserved.** You may download and use
+the official releases and view the source; copying, modifying or
+redistributing it needs written permission. See [LICENSE](LICENSE).
 
 ---
 

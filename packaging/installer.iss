@@ -28,6 +28,13 @@ PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#OutputDir}
 OutputBaseFilename=GhostRec-Setup-{#MyAppVersion}
 SetupIconFile={#SourceDir}\..\..\ghostrec\ui\assets\app.ico
+LicenseFile={#SourceDir}\..\..\LICENSE
+; file properties Windows and antivirus heuristics read (unsigned builds)
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCompany=jaeef
+VersionInfoCopyright=Copyright (c) 2026 jaeef. All rights reserved.
+VersionInfoProductName=GhostRec
+VersionInfoDescription=GhostRec Setup
 UninstallDisplayIcon={app}\GhostRec.exe
 Compression=lzma2
 SolidCompression=yes

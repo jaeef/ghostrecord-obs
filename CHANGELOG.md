@@ -2,6 +2,14 @@
 
 All notable changes to GhostRec OBS. Dates are release dates (YYYY-MM-DD).
 
+## [1.3.1] - 2026-11-13
+
+### Added
+- License: all rights reserved (LICENSE, shown in the installer).
+- Windows file properties (company, product, version, copyright) on
+  GhostRec.exe and the installer, and SHA-256 checksums with every release.
+- README: Download button, SmartScreen guidance, accurate quick start.
+
 ## [1.3.0] - 2026-11-13
 
 ### Changed

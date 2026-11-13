@@ -41,9 +41,16 @@ jobs:
           text = open("CHANGELOG.md", encoding="utf-8").read()
           m = re.search(rf"## \[{re.escape(version)}\].*?\n(.*?)(?=\n## \[|\Z)", text, re.S)
           notes = (m.group(1).strip() if m else "See CHANGELOG.md.")
+          sums = open("dist/SHA256SUMS.txt", encoding="utf-8").read().strip()
           notes = ("**Download `GhostRec-Setup-" + version + ".exe` below and run it.** "
                    "No admin rights or Python needed. Requires OBS Studio 28+ "
-                   "with the WebSocket server enabled.\n\n" + notes)
+                   "with the WebSocket server enabled.\n\n"
+                   "> **Windows SmartScreen** may say *Windows protected your PC* "
+                   "because the installer is not code-signed yet. Click "
+                   "**More info → Run anyway**. Verify the download with the "
+                   "SHA-256 below (`Get-FileHash .\\GhostRec-Setup-" + version +
+                   ".exe`).\n\n" + notes +
+                   "\n\n### SHA-256\n```\n" + sums + "\n```")
           open("release-notes.md", "w", encoding="utf-8").write(notes)
           EOF
       - name: Publish release
@@ -52,4 +59,5 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             dist/GhostRec-Setup-*.exe dist/GhostRec-*-portable.zip \
+            dist/SHA256SUMS.txt \
             --title "GhostRec ${GITHUB_REF_NAME}" --notes-file release-notes.md
