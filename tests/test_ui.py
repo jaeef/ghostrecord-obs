@@ -62,9 +62,9 @@ def test_activity_log_filters_and_counts(app):
         return sum(not log.list.item(i).isHidden()
                    for i in range(log.list.count()))
 
-    log._on_filter(log._seg_buttons["warn"])
+    log._seg_buttons["warn"].click()
     assert visible() == 2
-    log._on_filter(log._seg_buttons["error"])
+    log._seg_buttons["error"].click()
     assert visible() == 1
     log.clear()
     assert log.count() == 0
@@ -81,3 +81,26 @@ def test_library_buttons_follow_selection(app, tmp_path):
     assert page.delete_btn.isEnabled() and page.open_btn.isEnabled()
     page.table.clearSelection()
     assert not page.delete_btn.isEnabled()
+
+
+def test_card_titles_wrap_to_two_readable_lines(app):
+    from PyQt6.QtGui import QFontMetrics
+    from ghostrec.ui.pages.picker import _two_lines
+    fm = QFontMetrics(app.font())
+    assert _two_lines("Claude", fm, 200) == "Claude"
+    text = "Impeccable: The missing design vocabulary for agents - Google Chrome"
+    out = _two_lines(text, fm, 160)
+    first, second = out.split("\n")
+    assert text.startswith(first)                 # line one is never cut
+    assert fm.horizontalAdvance(second) <= 160    # line two fits (elided)
+
+
+def test_covered_is_normal_recording_not_a_warning():
+    from ghostrec.ui.pages.live import capture_health
+    ok = {"output_active": True, "minimized": False, "covered": False}
+    assert capture_health(ok, may_freeze=False) == ("rec", "REC")
+    covered = dict(ok, covered=True)
+    assert capture_health(covered, may_freeze=False) == ("rec", "REC")
+    assert capture_health(covered, may_freeze=True)[0] == "warn"
+    assert capture_health(dict(ok, minimized=True), False)[0] == "warn"
+    assert capture_health(dict(ok, output_active=False), False)[0] == "warn"

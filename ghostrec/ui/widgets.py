@@ -1,12 +1,40 @@
-"""Small reusable widgets for the GhostRec GUI (macOS-style)."""
+"""Small reusable widgets for the GhostRec GUI."""
 
-from PyQt6.QtCore import QRect, QRectF, QSize, Qt, QTimer
+from PyQt6.QtCore import QRect, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
 from PyQt6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel,
                              QListWidget, QListWidgetItem, QPushButton,
                              QSizePolicy, QVBoxLayout, QWidget)
 
 from ghostrec.ui import theme
+
+
+class Segmented(QWidget):
+    """Windows-style segmented filter. Buttons never shrink below their
+    label (they used to be squeezed into "Al / w / p")."""
+
+    changed = pyqtSignal(str)
+
+    def __init__(self, options, parent=None):
+        super().__init__(parent)
+        self.setObjectName("segmented")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(2, 2, 2, 2)
+        lay.setSpacing(2)
+        group = QButtonGroup(self)
+        self.buttons = {}
+        for i, (key, label) in enumerate(options):
+            b = QPushButton(label)
+            b.setObjectName("segment")
+            b.setCheckable(True)
+            b.setChecked(i == 0)
+            b.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            b.clicked.connect(lambda _=False, k=key: self.changed.emit(k))
+            group.addButton(b)
+            lay.addWidget(b)
+            self.buttons[key] = b
 
 
 class StatusPill(QWidget):
@@ -32,8 +60,8 @@ class StatusPill(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(9, 0, 11, 0)
         lay.setSpacing(6)
-        self._dot = QLabel("●")
-        self._dot.setFixedWidth(10)
+        self._dot = QLabel()
+        self._dot.setFixedSize(6, 6)
         self._text = QLabel(text)
         lay.addWidget(self._dot)
         lay.addWidget(self._text)
@@ -44,7 +72,7 @@ class StatusPill(QWidget):
         self._state = state
         dot_color, bg, border = self._colors(state)
         self._dot.setStyleSheet(
-            f"color: {dot_color}; font-size: 9px; background: transparent;")
+            f"background: {dot_color}; border-radius: 3px;")
         self._text.setStyleSheet(
             f"color: {theme.TEXT}; font-weight: 500; font-size: 11px; "
             "background: transparent;")
@@ -172,32 +200,24 @@ class ActivityLog(QWidget):
         title.setObjectName("sectionHeader")
         head.addWidget(title)
         head.addSpacing(6)
-        seg = QWidget()
-        seg.setObjectName("segmented")
-        seg.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        seg_lay = QHBoxLayout(seg)
-        seg_lay.setContentsMargins(2, 2, 2, 2)
-        seg_lay.setSpacing(2)
-        self._group = QButtonGroup(self)
-        self._seg_buttons = {}
-        for key in ("all", "warn", "error"):
-            b = QPushButton()
-            b.setObjectName("segment")
-            b.setCheckable(True)
-            b.setProperty("segKey", key)
-            b.setChecked(key == "all")
-            self._group.addButton(b)
-            seg_lay.addWidget(b)
-            self._seg_buttons[key] = b
-        self._group.buttonClicked.connect(self._on_filter)
+        seg = Segmented([("all", "All"), ("warn", "Warnings"),
+                         ("error", "Errors")])
+        self._seg_buttons = seg.buttons
+        seg.changed.connect(self._on_filter)
         head.addWidget(seg)
         head.addStretch(1)
-        self.copy_btn = QPushButton("Copy")
-        self.copy_btn.setObjectName("ghost")
+        from ghostrec.ui.chrome import GLYPHS
+        self.copy_btn = QPushButton(GLYPHS["copy"])
+        self.copy_btn.setObjectName("iconButton")
+        self.copy_btn.setFixedSize(30, 28)
         self.copy_btn.setToolTip("Copy the log to the clipboard")
+        self.copy_btn.setAccessibleName("Copy log")
         self.copy_btn.clicked.connect(self.copy)
-        self.clear_btn = QPushButton("Clear")
-        self.clear_btn.setObjectName("ghost")
+        self.clear_btn = QPushButton(GLYPHS["delete"])
+        self.clear_btn.setObjectName("iconButton")
+        self.clear_btn.setFixedSize(30, 28)
+        self.clear_btn.setToolTip("Clear the log")
+        self.clear_btn.setAccessibleName("Clear log")
         self.clear_btn.clicked.connect(self.clear)
         head.addWidget(self.copy_btn)
         head.addWidget(self.clear_btn)
@@ -257,7 +277,9 @@ class ActivityLog(QWidget):
         lay.setSpacing(10)
         color = {"error": theme.ERR, "warn": theme.WARN, "ok": theme.OK
                  }.get(level, theme.DIMMED)
-        glyph = {"error": "✕", "warn": "!", "ok": "✓"}.get(level, "•")
+        from ghostrec.ui.chrome import GLYPHS
+        glyph = {"error": GLYPHS["error"], "warn": GLYPHS["warning"],
+                 "ok": GLYPHS["check"]}.get(level, "•")
         dot = QLabel(glyph)
         dot.setFixedSize(16, 16)
         dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -265,9 +287,9 @@ class ActivityLog(QWidget):
             dot.setStyleSheet(f"color: {color}; font-size: 14px; "
                               "background: transparent;")
         else:
-            dot.setStyleSheet(f"background: {color}; color: white; "
-                              "border-radius: 8px; font-size: 9px; "
-                              "font-weight: 800;")
+            dot.setStyleSheet(f"color: {color}; font-size: 13px; "
+                              f"font-family: {theme.FONT_ICONS}; "
+                              "background: transparent;")
         t = QLabel(stamp)
         t.setObjectName("logTime")
         tag = QLabel(self._SOURCES.get(source, source.title()))
@@ -287,8 +309,8 @@ class ActivityLog(QWidget):
         return (self._filter == "all" or level == self._filter
                 or (self._filter == "warn" and level == "error"))
 
-    def _on_filter(self, button):
-        self._filter = button.property("segKey") or "all"
+    def _on_filter(self, key):
+        self._filter = key
         for i in range(self.list.count()):
             item = self.list.item(i)
             item.setHidden(not self._matches(
@@ -305,8 +327,9 @@ class ActivityLog(QWidget):
     def copy(self):
         lines = [f"{s}  [{src}] {t}" for _, s, src, t in self._entries]
         QApplication.clipboard().setText("\n".join(lines))
-        self.copy_btn.setText("Copied ✓")
-        QTimer.singleShot(1500, lambda: self.copy_btn.setText("Copy"))
+        from ghostrec.ui.chrome import GLYPHS
+        self.copy_btn.setText(GLYPHS["check"])
+        QTimer.singleShot(1500, lambda: self.copy_btn.setText(GLYPHS["copy"]))
 
     def clear(self):
         self._entries.clear()

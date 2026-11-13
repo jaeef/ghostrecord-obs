@@ -1,6 +1,6 @@
-"""macOS-style alerts that replace QMessageBox everywhere in the app.
+"""Themed alerts that replace QMessageBox everywhere in the app.
 
-Layout follows the modern macOS alert: app icon (with a caution badge for
+Layout: app icon (with a caution badge for
 warnings), bold centered title, secondary message, and buttons that sit side
 by side when there are two or stack full-width when there are more. The parent
 window is dimmed while the alert is open.
@@ -21,13 +21,15 @@ from PyQt6.QtWidgets import (QApplication, QDialog, QGraphicsDropShadowEffect,
                              QVBoxLayout, QWidget)
 
 from ghostrec.ui import branding, theme
+from ghostrec.ui.chrome import GLYPHS
 
-_BADGE = {"warning": ("!", "WARN"), "error": ("!", "ERR"),
-          "question": ("?", "ACCENT"), "info": None, "success": ("✓", "OK")}
+_BADGE = {"warning": ("warning", "WARN"), "error": ("error", "ERR"),
+          "question": ("info", "ACCENT"), "info": None,
+          "success": ("check", "OK")}
 
 
 def _icon_pixmap(kind, size=64):
-    """App icon with a small macOS-style badge in the corner."""
+    """App icon with a small status badge in the corner."""
     dpr = 2.0
     pm = QPixmap(int(size * dpr), int(size * dpr))
     pm.setDevicePixelRatio(dpr)
@@ -48,12 +50,13 @@ def _icon_pixmap(kind, size=64):
         p.setBrush(QColor(getattr(theme, color_name)))
         p.drawEllipse(c, r, r)
         f = QFont()
-        f.setBold(True)
-        f.setPixelSize(int(r * 1.35))
+        f.setFamilies(["Segoe Fluent Icons", "Segoe MDL2 Assets"])
+        f.setPixelSize(int(r * 1.1))
         p.setFont(f)
-        p.setPen(QColor("white"))
+        p.setPen(QColor(theme.ACCENT_TEXT if color_name == "ACCENT"
+                        else "#1b1b1b" if color_name == "WARN" else "white"))
         p.drawText(QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r),
-                   Qt.AlignmentFlag.AlignCenter, glyph)
+                   Qt.AlignmentFlag.AlignCenter, GLYPHS[glyph])
     p.end()
     return pm
 
@@ -141,12 +144,9 @@ class MacAlert(QDialog):
         stacked = len(buttons) > 2 or any(len(b[0]) > 16 for b in buttons)
         row = QVBoxLayout() if stacked else QHBoxLayout()
         row.setSpacing(8)
-        # side-by-side: cancel left, default right (macOS order)
         ordered = list(buttons)
-        # side by side: Cancel left, action right; stacked: action on top,
-        # Cancel at the bottom (macOS order)
-        ordered.sort(key=lambda b: (0 if b[1] == "cancel" else 1)
-                     if not stacked else (1 if b[1] == "cancel" else 0))
+        # Windows order: action first (left / top), Cancel last
+        ordered.sort(key=lambda b: 1 if b[1] == "cancel" else 0)
         self._default = None
         for label, role in ordered:
             b = QPushButton(label.replace("&", "&&"))

@@ -105,6 +105,17 @@ def fake_window(monkeypatch, window_state):
                         lambda req, timeout=30, log=None:
                         (req.stop_record().output_path, False))
     monkeypatch.setattr(rec.time, "sleep", lambda s: None)
+    # the real app may be recording right now and own the system-wide lock;
+    # tests get a private lock so they never collide with it
+
+    class _Lock:
+        def acquire(self):
+            return True
+
+        def release(self):
+            pass
+
+    monkeypatch.setattr(rec, "RecordingLock", _Lock)
     return win
 
 

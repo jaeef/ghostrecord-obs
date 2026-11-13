@@ -12,14 +12,30 @@ from PyQt6.QtCore import (QEasingCurve, QPropertyAnimation, Qt, QTimer,
                           pyqtSignal)
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import (QComboBox, QFrame, QHBoxLayout, QLabel,
-                              QListWidget, QListWidgetItem, QPushButton,
-                              QScrollArea, QSizePolicy, QVBoxLayout, QWidget)
+                              QPushButton, QScrollArea, QSizePolicy,
+                              QVBoxLayout, QWidget)
 
 from ghostrec.core.library import open_file, show_in_explorer
 from ghostrec.ui import dialogs
+from ghostrec.ui.chrome import GLYPHS
 from ghostrec.ui.widgets import (ActivityLog, ElidedLabel, LevelMeter,
                                  StatusPill)
 
+
+
+def capture_health(ev, may_freeze):
+    """(state, badge) for a recording tick.
+
+    Being covered is the normal use of GhostRec, so it stays red. Yellow only
+    when the picture is actually at risk.
+    """
+    if not ev.get("output_active", True):
+        return "warn", "RESTARTING"
+    if ev.get("minimized"):
+        return "warn", "MINIMIZED"      # Windows stops drawing minimized windows
+    if ev.get("covered") and may_freeze:
+        return "warn", "MAY FREEZE"     # app throttles itself when covered
+    return "rec", "REC"
 
 
 def _hms(sec):
@@ -45,7 +61,8 @@ class LivePage(QWidget):
         self._silence_anim = None
         self._pid = 0
         self._hwnd = 0
-        self._capture_safe = False
+        self._may_freeze = False       # set by capture_advice
+        self.capture_state = None      # "rec" | "warn" | None (read by main)
 
         # Two columns. Left: notices, preview, activity. Right: a fixed-width
         # inspector whose content SCROLLS instead of being squeezed, with the
@@ -74,12 +91,12 @@ class LivePage(QWidget):
         advice.setSpacing(8)
         advice_top = QHBoxLayout()
         advice_top.setSpacing(10)
-        advice_icon = QLabel("⚠")
+        advice_icon = QLabel(GLYPHS["warning"])
         advice_icon.setObjectName("noticeIconWarn")
         self.advice_label = QLabel("")
         self.advice_label.setWordWrap(True)
         self.advice_label.setObjectName("adviceText")
-        self.advice_dismiss = QPushButton("✕")
+        self.advice_dismiss = QPushButton(GLYPHS["close"])
         self.advice_dismiss.setObjectName("closeButton")
         self.advice_dismiss.setFixedSize(22, 22)
         self.advice_dismiss.clicked.connect(self.advice_box.hide)
@@ -118,7 +135,7 @@ class LivePage(QWidget):
         result_row = QHBoxLayout(self.result_box)
         result_row.setContentsMargins(14, 8, 8, 8)
         result_row.setSpacing(8)
-        ok_icon = QLabel("✓")
+        ok_icon = QLabel(GLYPHS["check"])
         ok_icon.setObjectName("noticeIconOk")
         self.result_label = ElidedLabel("")
         self.result_label.setObjectName("resultText")
@@ -178,7 +195,7 @@ class LivePage(QWidget):
         self.state_label.setObjectName("sectionHeader")
         state_row.addWidget(self.state_label)
         state_row.addStretch(1)
-        self.rec_badge = QLabel("● REC")
+        self.rec_badge = QLabel("REC")
         self.rec_badge.setObjectName("recBadge")
         self.rec_badge.hide()
         state_row.addWidget(self.rec_badge)
@@ -305,6 +322,19 @@ class LivePage(QWidget):
     def _set_state(self, text):
         self.state_label.setText(text)
 
+    def _paint_capture(self, state, badge="REC"):
+        """OBS-style: red while recording, yellow when at risk, else plain."""
+        self.capture_state = state
+        self.rec_badge.setText(badge)
+        self.rec_badge.setVisible(bool(state))
+        for w in (self.rec_badge, self.timer_label):
+            w.setProperty("state", state or "")
+            w.style().unpolish(w)
+            w.style().polish(w)
+
+    def restyle(self):
+        self._paint_capture(self.capture_state, self.rec_badge.text())
+
     # -- API used by the main window ----------------------------------------- #
 
     def set_silence_limit(self, seconds):
@@ -325,8 +355,8 @@ class LivePage(QWidget):
 
     def on_capture_advice(self, ev):
         """Recorder detected an app that freezes itself when covered."""
-        self._capture_safe = bool(ev.get("friendly"))
-        if self._capture_safe:
+        self._may_freeze = not ev.get("friendly")
+        if not self._may_freeze:
             self.advice_box.hide()
             self.add_feed("obs", "target app keeps rendering when covered "
                                 "— recording stays sharp")
@@ -372,7 +402,7 @@ class LivePage(QWidget):
         self.target_title.setText("—")
         self.target_meta.setText("PID —  •  HWND —")
         self.advice_box.hide()
-        self._capture_safe = False
+        self._may_freeze = False
         self._hide_silence()
 
     def on_started(self, ev):
@@ -381,7 +411,7 @@ class LivePage(QWidget):
         self._base_time = time.time()
         self.stop_btn.setEnabled(True)
         self.stop_btn.setText("Stop && Save")
-        self.rec_badge.show()
+        self._paint_capture("rec")
         self._set_state("Recording")
         self._set_target(ev.get("window_title", ""), ev.get("pid", 0),
                          ev.get("hwnd", 0))
@@ -391,6 +421,7 @@ class LivePage(QWidget):
         self.add_feed("rec", f"Recording started — '{ev.get('name', '')}'")
 
     def on_tick(self, ev):
+        self._paint_capture(*capture_health(ev, self._may_freeze))
         self._base_elapsed = float(ev.get("elapsed", 0.0))
         self._base_time = time.time()
         if ev.get("output_active", True):
@@ -401,7 +432,9 @@ class LivePage(QWidget):
             self.pill_min.set_state("warn", "Minimized")
         else:
             self.pill_min.set_state("ok", "Visible")
-        if ev.get("covered") and ev.get("capture_method") == 2:
+        if ev.get("covered") and self._may_freeze:
+            self.pill_cover.set_state("warn", "May freeze")
+        elif ev.get("covered") and ev.get("capture_method") == 2:
             self.pill_cover.set_state("ok", "Protected")
         elif ev.get("covered"):
             self.pill_cover.set_state("warn", "Legacy capture")
@@ -424,7 +457,7 @@ class LivePage(QWidget):
             self._hide_silence()
 
     def on_stopping(self, _ev):
-        self.rec_badge.hide()
+        self._paint_capture(None)
         self._set_state("Saving…")
         self.stop_btn.setEnabled(False)
         self.stop_btn.setText("Finalizing…")
@@ -451,7 +484,7 @@ class LivePage(QWidget):
 
     def on_aborted(self, reason):
         self._running = False
-        self.rec_badge.hide()
+        self._paint_capture(None)
         self._set_state("Not started")
         self.capture_combo.setEnabled(True)
         self.stop_btn.setEnabled(False)
@@ -460,7 +493,7 @@ class LivePage(QWidget):
 
     def on_error(self, text):
         self._running = False
-        self.rec_badge.hide()
+        self._paint_capture(None)
         self._set_state("Stopped")
         self.capture_combo.setEnabled(True)
         self.stop_btn.setEnabled(False)

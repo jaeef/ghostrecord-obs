@@ -19,7 +19,13 @@ from conftest import FakeObs
 
 def test_defaults_validate():
     cfg = gcfg.validate_config(copy.deepcopy(gcfg.DEFAULT_CONFIG))
-    assert cfg["ui"] == {"appearance": "auto", "native_frame": False}
+    assert cfg["ui"] == {"appearance": "auto"}
+
+
+def test_legacy_native_frame_key_is_dropped():
+    cfg = gcfg.validate_config({"obs": {}, "output_folder": "./rec",
+                                "ui": {"native_frame": True}})
+    assert "native_frame" not in cfg["ui"]
 
 
 def test_missing_sections_get_defaults():

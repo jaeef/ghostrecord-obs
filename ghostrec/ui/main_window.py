@@ -9,7 +9,7 @@ import copy
 import queue
 import threading
 
-from PyQt6.QtCore import QEvent, Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QListWidget,
                              QListWidgetItem, QMainWindow,
                              QPushButton, QStackedWidget, QSystemTrayIcon,
@@ -51,14 +51,7 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(branding.app_icon())
         gcfg.ensure_config()
         self.cfg = gcfg.validate_config(gcfg.load_config())
-        self._native_frame = bool(self.cfg.get("ui", {}).get("native_frame"))
-        if not self._native_frame:
-            # macOS look: our own title bar with traffic lights
-            self.setWindowFlags(Qt.WindowType.Window
-                                | Qt.WindowType.FramelessWindowHint
-                                | Qt.WindowType.WindowSystemMenuHint
-                                | Qt.WindowType.WindowMinMaxButtonsHint)
-            self._resizer = chrome.FramelessResizer(self)
+        self._capture_state = None   # None | "rec" | "warn"
         self.resize(1180, 780)
         self.setMinimumSize(980, 680)
         self.req = None
@@ -95,7 +88,7 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
 
         # ---- sidebar (source list) ---------------------------------------
-        sidebar = chrome.DragRegion()
+        sidebar = QWidget()
         sidebar.setObjectName("sidebarPane")
         sidebar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         sidebar.setFixedWidth(220)
@@ -103,17 +96,7 @@ class MainWindow(QMainWindow):
         side.setContentsMargins(0, 0, 0, 0)
         side.setSpacing(0)
 
-        lights_row = QHBoxLayout()
-        lights_row.setContentsMargins(14, 14, 14, 0)
-        self.lights = chrome.TrafficLights()
-        self.lights.close_clicked.connect(self.close)
-        self.lights.minimize_clicked.connect(self.showMinimized)
-        self.lights.zoom_clicked.connect(lambda: chrome.toggle_zoom(self))
-        self.lights.setVisible(not self._native_frame)
-        lights_row.addWidget(self.lights)
-        lights_row.addStretch(1)
-        side.addLayout(lights_row)
-        side.addSpacing(22)
+        side.addSpacing(16)
 
         section = QLabel("GhostRec")
         section.setObjectName("sidebarSection")
@@ -163,7 +146,7 @@ class MainWindow(QMainWindow):
         right.setContentsMargins(0, 0, 0, 0)
         right.setSpacing(0)
 
-        toolbar = chrome.DragRegion()
+        toolbar = QWidget()
         toolbar.setObjectName("toolbar")
         toolbar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         toolbar.setFixedHeight(56)
@@ -245,7 +228,12 @@ class MainWindow(QMainWindow):
         for i, (_, icon, *_rest) in enumerate(PAGES):
             item = self.nav.item(i)
             if item is not None:
-                item.setIcon(chrome.sidebar_icon(icon))
+                # neutral icons; the current page gets the accent, and Live
+                # turns red while recording (OBS-style)
+                color = (theme.ERR if icon == "live" and self._capture_state
+                         else theme.ACCENT_FG if i == self.nav.currentRow()
+                         else theme.MUTED)
+                item.setIcon(chrome.glyph_icon(icon, color))
 
     def _set_appearance(self, appearance):
         """Re-theme the running app. None = re-resolve the saved preference."""
@@ -259,28 +247,32 @@ class MainWindow(QMainWindow):
         self._refresh_nav_icons()
         for pill in self.findChildren(StatusPill):
             pill.restyle()
-        self.lights.update()
         self.picker.restyle()
-        if not self._native_frame:
-            chrome.apply_native_effects(self, dark=(mode == "dark"))
+        self.live.restyle()
+        chrome.style_window(self)
 
     def showEvent(self, event):
         super().showEvent(event)
-        if not getattr(self, "_effects_applied", False):
-            self._effects_applied = True
-            if not self._native_frame:
-                chrome.apply_native_effects(self, dark=theme.is_dark())
+        chrome.style_window(self)
 
-    def changeEvent(self, event):
-        super().changeEvent(event)
-        if event.type() == QEvent.Type.ActivationChange and hasattr(
-                self, "lights"):
-            self.lights.update()  # gray traffic lights when inactive
+    def _set_capture_state(self, state):
+        """OBS-style cue on the logo: red dot while recording, yellow dot
+        when the recording is at risk (see live.capture_health). Shows in the
+        title bar, the taskbar and the tray."""
+        if state == self._capture_state:
+            return
+        self._capture_state = state
+        icon = branding.status_icon(state) if state else branding.app_icon()
+        self.setWindowIcon(icon)
+        if self.tray:
+            self.tray.setIcon(branding.status_icon(state))
+        self._refresh_nav_icons()
 
     def _on_nav(self, row):
         if row < 0:
             return
         self.stack.setCurrentIndex(row)
+        self._refresh_nav_icons()
         self.toolbar_title.setText(PAGES[row][2])
         self.toolbar_subtitle.setText(PAGES[row][3])
         if row != PAGE_SETTINGS and self._previewing_appearance:
@@ -493,6 +485,7 @@ class MainWindow(QMainWindow):
         elif t == "relocked":
             self.live.on_relocked(ev)
         elif t == "started":
+            self._set_capture_state("rec")
             self.live.on_started(ev)
             if self.tray:
                 self.tray.set_recording(True)
@@ -501,6 +494,7 @@ class MainWindow(QMainWindow):
                                  f"{ev.get('window_title', '')}")
         elif t == "tick":
             self.live.on_tick(ev)
+            self._set_capture_state(self.live.capture_state)
             if self.tray:
                 self.tray.update_elapsed(ev.get("elapsed", 0.0))
         elif t == "warning":
@@ -509,6 +503,7 @@ class MainWindow(QMainWindow):
                 self.tray.notify("GhostRec warning", ev.get("text", ""),
                                  warn=True)
         elif t == "stopping":
+            self._set_capture_state(None)
             self.live.on_stopping(ev)
         elif t == "stopped":
             self._stop_preview()
@@ -545,6 +540,7 @@ class MainWindow(QMainWindow):
                 self.tray.notify("GhostRec error", ev.get("text", ""),
                                  warn=True)
         elif t == "finished":
+            self._set_capture_state(None)
             self.session = None
 
     # -------------------------------------------------------- quick actions -- #

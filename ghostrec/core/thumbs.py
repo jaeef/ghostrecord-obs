@@ -86,3 +86,29 @@ def capture(hwnd, max_pixels=1920 * 1200):
             _gdi32.DeleteObject(bmp)
         _gdi32.DeleteDC(mem_dc)
         _user32.ReleaseDC(None, screen_dc)
+
+
+_user32.SendMessageTimeoutW.argtypes = [
+    wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM,
+    wintypes.UINT, wintypes.UINT, ctypes.POINTER(ctypes.c_size_t)]
+_user32.GetClassLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int]
+_user32.GetClassLongPtrW.restype = ctypes.c_size_t
+
+
+def icon_handle(hwnd):
+    """The window's own HICON (what the taskbar shows), or 0.
+
+    Works for Store apps where the exe path gives no icon. The handle belongs
+    to the window, never destroy it.
+    """
+    hwnd = wintypes.HWND(hwnd)
+    out = ctypes.c_size_t(0)
+    for kind in (1, 2, 0):          # ICON_BIG, ICON_SMALL2, ICON_SMALL
+        if _user32.SendMessageTimeoutW(hwnd, 0x007F, kind, 0, 0x0002, 100,
+                                       ctypes.byref(out)) and out.value:
+            return out.value
+    for index in (-14, -34):        # GCLP_HICON, GCLP_HICONSM
+        h = _user32.GetClassLongPtrW(hwnd, index)
+        if h:
+            return h
+    return 0

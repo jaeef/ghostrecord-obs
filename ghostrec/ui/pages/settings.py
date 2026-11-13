@@ -12,7 +12,7 @@ from ghostrec.ui import theme
 
 
 def _form(box):
-    """macOS-style form: right-aligned labels, roomy rows."""
+    """Settings form: right-aligned labels, roomy rows."""
     form = QFormLayout(box)
     form.setLabelAlignment(Qt.AlignmentFlag.AlignRight
                            | Qt.AlignmentFlag.AlignVCenter)
@@ -64,9 +64,6 @@ class SettingsPage(QWidget):
         self.appearance_combo.addItem("Light", "light")
         self.appearance_combo.addItem("Dark", "dark")
         look_form.addRow("Appearance:", self.appearance_combo)
-        self.native_frame = QCheckBox(
-            "Use the standard Windows title bar (restart to apply)")
-        look_form.addRow("", self.native_frame)
         root.addWidget(look_box)
         self.appearance_combo.currentIndexChanged.connect(
             self._emit_appearance)
@@ -255,7 +252,6 @@ class SettingsPage(QWidget):
         ui = cfg.get("ui", {})
         idx = self.appearance_combo.findData(ui.get("appearance", "auto"))
         self.appearance_combo.setCurrentIndex(max(0, idx))
-        self.native_frame.setChecked(bool(ui.get("native_frame", False)))
         self.refresh_webview2_state()
         self._loading = False
 
@@ -285,7 +281,6 @@ class SettingsPage(QWidget):
         audio["minimize_warn_seconds"] = int(self.minimize_secs.value())
         ui = cfg.setdefault("ui", {})
         ui["appearance"] = self.appearance_combo.currentData() or "auto"
-        ui["native_frame"] = bool(self.native_frame.isChecked())
         return cfg
 
     def show_test_result(self, ok, msg):

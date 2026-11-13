@@ -1,6 +1,6 @@
 """System tray icon: recording state, quick actions, notifications."""
 
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QMenu, QSystemTrayIcon
 
 from ghostrec.ui import branding
@@ -10,8 +10,6 @@ class TrayIcon(QSystemTrayIcon):
     def __init__(self, window, on_stop, on_quit):
         super().__init__(window)
         self._window = window
-        self._icon_idle: QIcon = branding.tray_icon(False)
-        self._icon_rec: QIcon = branding.tray_icon(True)
         self._recording = False
 
         menu = QMenu()
@@ -29,14 +27,13 @@ class TrayIcon(QSystemTrayIcon):
         self.setContextMenu(menu)
         self.activated.connect(self._on_activated)
 
-        self.setIcon(self._icon_idle)
+        self.setIcon(branding.status_icon(None))
         self.setToolTip("GhostRec OBS — idle")
         self.show()
 
     def set_recording(self, recording):
         self._recording = bool(recording)
         self.stop_action.setEnabled(self._recording)
-        self.setIcon(self._icon_rec if self._recording else self._icon_idle)
         if not self._recording:
             self.setToolTip("GhostRec OBS — idle")
 

@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from PyQt6.QtCore import QRectF, Qt
-from PyQt6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PyQt6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtSvg import QSvgRenderer
 
 
@@ -30,7 +30,8 @@ ICON_ICO = ASSETS / "app.ico"
 ICON_DARK_SVG = ASSETS / "icon-dark.svg"  # mark on the graphite plate
 TRAY_IDLE_SVG = ASSETS / "tray-idle.svg"  # plate mark without the REC dot
 
-REC_COLOR = "#FF453A"
+REC_COLOR = "#FF453A"       # OBS-style recording dot
+WARN_COLOR = "#FCE100"      # recording at risk (minimized, may freeze)
 
 # Sizes Windows asks for: tray (16-24), alt-tab (32), taskbar (48+).
 _TRAY_SIZES = (16, 20, 24, 32, 48, 64)
@@ -66,19 +67,26 @@ def app_icon() -> QIcon:
     return icon
 
 @lru_cache(maxsize=4)
-def tray_icon(recording: bool = False) -> QIcon:
-    """Tray icon: plate mark, with a REC badge when recording."""
+def status_icon(state=None) -> QIcon:
+    """Logo with an OBS-style dot: red while recording, yellow when the
+    recording is at risk. ``state=None`` is the plain mark (no dot).
+
+    Used for the window (title bar + taskbar) and the tray.
+    """
     base = TRAY_IDLE_SVG if TRAY_IDLE_SVG.exists() else ICON_DARK_SVG
+    color = {"rec": REC_COLOR, "warn": WARN_COLOR}.get(state)
     icon = QIcon()
     for size in _TRAY_SIZES:
         pm = QPixmap(_render(base, size))
-        if recording:
+        if color:
             p = QPainter(pm)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(REC_COLOR))
-            d = size * 0.42
-            p.drawEllipse(QRectF(size - d, size - d, d, d))
+            d = size * 0.46
+            rect = QRectF(size - d, size - d, d, d)
+            # dark ring keeps the dot visible on light taskbars (yellow!)
+            p.setPen(QPen(QColor("#1b1b1b"), max(1.0, size / 24)))
+            p.setBrush(QColor(color))
+            p.drawEllipse(rect.adjusted(0.5, 0.5, -0.5, -0.5))
             p.end()
         icon.addPixmap(pm)
     return icon

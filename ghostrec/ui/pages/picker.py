@@ -8,10 +8,11 @@ restored, keeps drawing when covered), the file name and the record button.
 import os
 import threading
 
-from PyQt6.QtCore import (QFileInfo, QSettings, QSize, Qt, QTimer,
+from PyQt6.QtCore import (QEvent, QFileInfo, QSettings, QSize, Qt, QTimer,
                           pyqtSignal)
-from PyQt6.QtGui import QImage, QKeySequence, QPixmap, QShortcut
-from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFileIconProvider,
+from PyQt6.QtGui import (QColor, QIcon, QImage, QKeySequence, QPainter,
+                         QPixmap, QShortcut)
+from PyQt6.QtWidgets import (QFileIconProvider,
                              QFrame, QHBoxLayout, QLabel, QLineEdit,
                              QListView, QListWidget, QListWidgetItem,
                              QPushButton, QScrollArea, QSizePolicy,
@@ -20,13 +21,15 @@ from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QFileIconProvider,
 from ghostrec.core.library import unique_recording_name
 from ghostrec.core.recorder import sanitize_recording_name
 from ghostrec.core.safe_apps import app_kind, app_name, is_recording_safe
-from ghostrec.core.thumbs import capture as capture_thumb
+from ghostrec.core.thumbs import capture as capture_thumb, icon_handle
 from ghostrec.core.windows import list_windows
 from ghostrec.ui import theme
-from ghostrec.ui.widgets import ElidedLabel
+from ghostrec.ui.chrome import GLYPHS, glyph_icon
+from ghostrec.ui.widgets import ElidedLabel, Segmented
 
-CARD_W, CARD_H = 228, 214
-THUMB_W, THUMB_H = 204, 124
+MIN_CARD_W = 236      # columns = how many of these fit; cards then stretch
+GAP = 12
+PAD = 12              # inner card padding
 
 
 def _to_image(raw, w, h):
@@ -47,19 +50,58 @@ def _cover(pixmap, w, h):
     return scaled.copy(x, y, w, h)
 
 
-class WindowTile(QWidget):
-    """Gallery card: thumbnail, app icon, title, one status badge."""
+def _two_lines(text, fm, width):
+    """Wrap to at most two lines; the second is elided. Never mid-word cut
+    on line one, so the start of a title is always readable."""
+    if fm.horizontalAdvance(text) <= width:
+        return text
+    words, line = text.split(), ""
+    for i, word in enumerate(words):
+        trial = f"{line} {word}".strip()
+        if fm.horizontalAdvance(trial) > width:
+            if not line:            # one huge word: plain elide
+                break
+            rest = " ".join(words[i:])
+            return line + "\n" + fm.elidedText(
+                rest, Qt.TextElideMode.ElideRight, width)
+        line = trial
+    return fm.elidedText(text, Qt.TextElideMode.ElideRight, width)
 
-    def __init__(self, win, icon=None, parent=None):
+
+def _letter_icon(name, size=40):
+    """Fallback app badge: first letter on an accent circle."""
+    pm = QPixmap(size, size)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setBrush(QColor(theme.ACCENT))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(0, 0, size, size)
+    p.setPen(QColor(theme.ACCENT_TEXT))
+    f = p.font()
+    f.setBold(True)
+    f.setPixelSize(int(size * 0.5))
+    p.setFont(f)
+    p.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter,
+               (name.strip()[:1] or "?").upper())
+    p.end()
+    return QIcon(pm)
+
+
+class WindowTile(QWidget):
+    """Gallery card: thumbnail, app icon, two-line title, one status badge."""
+
+    def __init__(self, win, icon, parent=None):
         super().__init__(parent)
         self.win = win
+        self._icon = icon
+        self._pixmap = None
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 12, 12, 12)
+        lay.setContentsMargins(PAD, PAD, PAD, PAD)
         lay.setSpacing(0)
         self.thumb = QLabel()
         self.thumb.setObjectName("tileThumb")
-        self.thumb.setFixedSize(THUMB_W, THUMB_H)
         self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self.thumb)
         lay.addSpacing(10)
@@ -67,24 +109,22 @@ class WindowTile(QWidget):
         row = QHBoxLayout()
         row.setSpacing(8)
         self.icon = QLabel()
-        self.icon.setFixedSize(18, 18)
-        self._icon = icon
-        if icon is not None and not icon.isNull():
-            self.icon.setPixmap(icon.pixmap(18, 18))
-        row.addWidget(self.icon)
-        self.title = ElidedLabel(win.get("title", "Untitled"))
+        self.icon.setFixedSize(20, 20)
+        self.icon.setPixmap(icon.pixmap(20, 20))
+        row.addWidget(self.icon, 0, Qt.AlignmentFlag.AlignTop)
+        self.title = QLabel()
         self.title.setObjectName("tileTitle")
+        self.title.setToolTip(win.get("title", ""))
         row.addWidget(self.title, 1)
         lay.addLayout(row)
-        lay.addSpacing(4)
+        lay.addSpacing(6)
 
         meta = QHBoxLayout()
         meta.setSpacing(6)
-        exe = QLabel(app_name(win.get("exe")) if win.get("safe_kind")
-                     else (win.get("exe") or "").replace(".exe", ""))
-        exe.setObjectName("tileMeta")
-        meta.addWidget(exe)
-        meta.addStretch(1)
+        self.exe = ElidedLabel(app_name(win.get("exe")) if win.get("safe_kind")
+                               else (win.get("exe") or "").replace(".exe", ""))
+        self.exe.setObjectName("tileMeta")
+        meta.addWidget(self.exe, 1)
         badge = None
         if win.get("minimized"):
             badge = ("Minimized", "tileBadgeWarn")
@@ -98,19 +138,29 @@ class WindowTile(QWidget):
             meta.addWidget(b)
         lay.addLayout(meta)
         lay.addStretch(1)
-        self.set_thumbnail(None)
+
+    @staticmethod
+    def height_for(width):
+        thumb_h = int((width - 2 * PAD) * 0.58)
+        return thumb_h + 2 * PAD + 10 + 40 + 6 + 20
+
+    def set_width(self, width):
+        tw = width - 2 * PAD
+        self.thumb.setFixedSize(tw, int(tw * 0.58))
+        text_w = tw - 28
+        self.title.setText(_two_lines(self.win.get("title", "Untitled"),
+                                      self.title.fontMetrics(), text_w))
+        self.title.setFixedHeight(self.title.fontMetrics().lineSpacing() * 2)
+        self.set_thumbnail(self._pixmap)
 
     def set_thumbnail(self, pixmap):
-        pm = _cover(pixmap, THUMB_W, THUMB_H)
+        self._pixmap = pixmap
+        size = self.thumb.size()
+        pm = _cover(pixmap, size.width(), size.height())
         if pm is not None:
             self.thumb.setPixmap(pm)
-            self.thumb.setText("")
         else:
-            self.thumb.setPixmap(QPixmap())
-            if self._icon is not None and not self._icon.isNull():
-                self.thumb.setPixmap(self._icon.pixmap(40, 40))
-            else:
-                self.thumb.setText("No preview")
+            self.thumb.setPixmap(self._icon.pixmap(44, 44))
 
 
 class CheckRow(QWidget):
@@ -136,13 +186,14 @@ class CheckRow(QWidget):
 
     def set(self, state, text, action=None):
         """state: ok | warn | err | idle."""
-        glyph, color = {"ok": ("✓", theme.OK), "warn": ("!", theme.WARN),
-                        "err": ("✕", theme.ERR)}.get(state, ("•", theme.DIMMED))
+        glyph, color = {"ok": (GLYPHS["check"], theme.OK),
+                        "warn": (GLYPHS["warning"], theme.WARN),
+                        "err": (GLYPHS["close"], theme.ERR)
+                        }.get(state, ("•", theme.DIMMED))
         self.glyph.setText(glyph)
         self.glyph.setStyleSheet(
-            f"color: white; background: {color}; border-radius: 9px; "
-            "font-size: 11px; font-weight: 800; min-height: 18px; "
-            "max-height: 18px;" if state != "idle" else
+            f"color: {color}; font-family: {theme.FONT_ICONS}; "
+            "font-size: 14px;" if state != "idle" else
             f"color: {color}; font-size: 14px;")
         self.text.setText(text)
         self.action.setVisible(bool(action))
@@ -184,16 +235,9 @@ class PickerPage(QWidget):
         left.setSpacing(12)
         root.addLayout(left, 1)
 
-        hero = QVBoxLayout()
-        hero.setSpacing(2)
         h1 = QLabel("What do you want to record?")
         h1.setObjectName("heroTitle")
-        h2 = QLabel("Pick a window. Only that window is captured — keep "
-                    "working anywhere else.")
-        h2.setObjectName("pageSubtitle")
-        hero.addWidget(h1)
-        hero.addWidget(h2)
-        left.addLayout(hero)
+        left.addWidget(h1)
 
         bar = QHBoxLayout()
         bar.setSpacing(10)
@@ -201,38 +245,16 @@ class PickerPage(QWidget):
         self.search_edit.setObjectName("searchField")
         self.search_edit.setPlaceholderText("Search windows")
         self.search_edit.setClearButtonEnabled(True)
-        self.search_edit.setFixedWidth(220)
+        self.search_edit.setMinimumWidth(120)
+        self.search_edit.setMaximumWidth(260)
         bar.addWidget(self.search_edit)
 
-        seg = QWidget()
-        seg.setObjectName("segmented")
-        seg.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        seg_lay = QHBoxLayout(seg)
-        seg_lay.setContentsMargins(2, 2, 2, 2)
-        seg_lay.setSpacing(2)
-        self._seg_group = QButtonGroup(self)
-        for key, label in (("all", "All"), ("browser", "Browsers"),
-                           ("apps", "Apps")):
-            b = QPushButton(label)
-            b.setObjectName("segment")
-            b.setCheckable(True)
-            b.setProperty("segKey", key)
-            if key == "all":
-                b.setChecked(True)
-            self._seg_group.addButton(b)
-            seg_lay.addWidget(b)
-        self._seg_group.buttonClicked.connect(self._on_segment)
+        seg = Segmented([("all", "All"), ("browser", "Browsers"),
+                         ("apps", "Apps")])
+        seg.changed.connect(self._on_segment)
         bar.addWidget(seg)
         bar.addStretch(1)
-        self.count_label = QLabel("")
-        self.count_label.setObjectName("dimmed")
-        bar.addWidget(self.count_label)
-        self.auto_refresh = QCheckBox("Live")
-        self.auto_refresh.setToolTip("Refresh the window list and thumbnails "
-                                     "every few seconds")
-        self.auto_refresh.setChecked(True)
-        bar.addWidget(self.auto_refresh)
-        self.refresh_btn = QPushButton("↻")
+        self.refresh_btn = QPushButton(GLYPHS["refresh"])
         self.refresh_btn.setObjectName("iconButton")
         self.refresh_btn.setToolTip("Refresh now")
         self.refresh_btn.setFixedSize(30, 28)
@@ -247,13 +269,13 @@ class PickerPage(QWidget):
         self.list_widget.setFlow(QListView.Flow.LeftToRight)
         self.list_widget.setWrapping(True)
         self.list_widget.setUniformItemSizes(True)
-        self.list_widget.setGridSize(QSize(CARD_W + 14, CARD_H + 14))
         self.list_widget.setSpacing(0)
         self.list_widget.setSelectionMode(
             QListWidget.SelectionMode.SingleSelection)
         self.list_widget.setVerticalScrollMode(
             QListWidget.ScrollMode.ScrollPerPixel)
         self.list_widget.verticalScrollBar().setSingleStep(24)
+        self.list_widget.installEventFilter(self)
         left.addWidget(self.list_widget, 1)
 
         self.empty_label = QLabel("No windows match your search.")
@@ -343,7 +365,8 @@ class PickerPage(QWidget):
         f = QVBoxLayout(footer)
         f.setContentsMargins(18, 14, 18, 14)
         f.setSpacing(8)
-        self.start_btn = QPushButton("●  Start Recording")
+        self.start_btn = QPushButton("Start Recording")
+        self.start_btn.setIcon(glyph_icon("record", "#ffffff", 16))
         self.start_btn.setObjectName("recordButton")
         self.start_btn.setSizePolicy(QSizePolicy.Policy.Expanding,
                                      QSizePolicy.Policy.Fixed)
@@ -403,7 +426,7 @@ class PickerPage(QWidget):
     def set_busy(self, busy):
         self._busy = busy
         self._update_panel()
-        self.start_btn.setText("●  Start Recording" if not busy
+        self.start_btn.setText("Start Recording" if not busy
                                else "Recording in Progress…")
 
     def restyle(self):
@@ -418,8 +441,6 @@ class PickerPage(QWidget):
         self._refreshing = True
         self._refresh_generation += 1
         token = self._refresh_generation
-        if not self._wins:
-            self.count_label.setText("Scanning…")
 
         def work():
             thumbs = {}
@@ -436,6 +457,7 @@ class PickerPage(QWidget):
                         win["safe_kind"] = kind
                         win["record_friendly"] = is_recording_safe(
                             win.get("pid"), exe)
+                    win["hicon"] = icon_handle(win["hwnd"])
                     try:
                         shot = capture_thumb(win["hwnd"])
                     except Exception:
@@ -513,10 +535,9 @@ class PickerPage(QWidget):
         visible = self._visible()
         for w in visible:
             item = QListWidgetItem()
-            item.setSizeHint(QSize(CARD_W, CARD_H))
             item.setData(Qt.ItemDataRole.UserRole, w)
             self.list_widget.addItem(item)
-            tile = WindowTile(w, icon=self._icon_for(w.get("exe_path", "")))
+            tile = WindowTile(w, self._icon_for(w))
             tile.set_thumbnail(self._thumbs.get(w["hwnd"]))
             self.list_widget.setItemWidget(item, tile)
             self._tiles[w["hwnd"]] = tile
@@ -525,10 +546,11 @@ class PickerPage(QWidget):
         if self.list_widget.currentItem() is None and visible:
             self.list_widget.setCurrentRow(0)
         self.list_widget.blockSignals(False)
-        self.count_label.setText(
-            f"⚠ {error}" if error else
-            f"{len(visible)} window{'s' if len(visible) != 1 else ''}")
-        empty = not visible and bool(self._wins)
+        self._relayout()
+        empty = bool(error) or (not visible and bool(self._wins))
+        self.empty_label.setText(
+            f"Could not list windows: {error}" if error
+            else "No windows match your search.")
         self.empty_label.setVisible(empty)
         self.list_widget.setVisible(not empty)
         self._update_panel()
@@ -581,8 +603,8 @@ class PickerPage(QWidget):
         if win:
             self.make_safe_requested.emit(dict(win))
 
-    def _on_segment(self, button):
-        self._segment = button.property("segKey") or "all"
+    def _on_segment(self, key):
+        self._segment = key
         self._last_sig = None
         self._apply_windows(self._refresh_generation, self._wins, None, "")
 
@@ -591,15 +613,50 @@ class PickerPage(QWidget):
         self._last_sig = None
         self._apply_windows(self._refresh_generation, self._wins, None, "")
 
-    def _icon_for(self, exe_path):
-        if not exe_path:
-            return None
-        if exe_path not in self._icons:
-            self._icons[exe_path] = self._icon_provider.icon(QFileInfo(exe_path))
-        return self._icons[exe_path]
+    def _icon_for(self, win):
+        """Window's own icon, else the exe's icon, else a letter badge."""
+        hicon = win.get("hicon")
+        if hicon:
+            img = QImage.fromHICON(hicon)
+            if not img.isNull():
+                return QIcon(QPixmap.fromImage(img))
+        path = win.get("exe_path") or ""
+        if path:
+            if path not in self._icons:
+                self._icons[path] = self._icon_provider.icon(QFileInfo(path))
+            icon = self._icons[path]
+            if not icon.isNull() and icon.availableSizes():
+                return icon
+        return _letter_icon(win.get("title") or win.get("exe") or "?")
+
+    def _relayout(self):
+        """Fit as many columns as the width allows; stretch cards to fill."""
+        # always budget for the scrollbar, else the last column wraps when it
+        # appears and the grid collapses to one column
+        lw = self.list_widget
+        vw = lw.width() - lw.verticalScrollBar().sizeHint().width() - 16
+        if vw <= 0:
+            return
+        cols = max(1, vw // (MIN_CARD_W + GAP))
+        cell_w = vw // cols
+        card_w = cell_w - GAP
+        card_h = WindowTile.height_for(card_w)
+        self.list_widget.setGridSize(QSize(cell_w, card_h + GAP))
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            item.setSizeHint(QSize(card_w, card_h))
+            tile = self.list_widget.itemWidget(item)
+            if tile is not None:
+                tile.set_width(card_w)
+        lw.doItemsLayout()
+
+    def eventFilter(self, obj, event):
+        if obj is self.list_widget and event.type() == QEvent.Type.Resize:
+            QTimer.singleShot(0, self._relayout)
+        return super().eventFilter(obj, event)
 
     def _auto_tick(self):
-        if self._busy or not self.auto_refresh.isChecked():
+        if self._busy:
             return
         if not self.isVisible():
             return

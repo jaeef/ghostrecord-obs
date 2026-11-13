@@ -65,7 +65,7 @@ own work stay out of the video.
 | **Make recording-safe** | Chromium apps (Chrome, Edge, Brave, Opera, Vivaldi), Electron apps (Slack, Discord, VS Code, classic Teams…) and new Teams (WebView2) stop drawing when covered. One click restarts them with switches that keep them drawing; GhostRec asks before force-quitting anything and the WebView2 setting can be removed in Settings. |
 | **Audio monitoring** | Silence detection with a threshold and timeout, plus a live level meter. |
 | **Recording library** | Browse, play, reveal and move recordings to the Recycle Bin, with date, size and duration details. |
-| **macOS-style UI** | Sidebar + unified toolbar, traffic-light window controls, light/dark appearance that follows Windows (or set it in Settings). |
+| **Windows 11 UI** | Native title bar, Fluent icons, soft orange accent, light/dark that follows Windows. Like OBS, the app logo (title bar, taskbar, tray) gets a red dot while recording — covered or not — and turns yellow only when the recording is at risk (window minimized, app may freeze, output restarting). |
 | **System tray** | Idle/recording tray icon, stop-from-tray, notifications, single-instance guard. |
 | **CLI + GUI** | Same core and the same `config.json`; use whichever fits. |
 
@@ -205,8 +205,7 @@ The GUI's Settings page edits the same file.
     "minimize_warn_seconds": 60
   },
   "ui": {
-    "appearance": "auto",
-    "native_frame": false
+    "appearance": "auto"
   }
 }
 ```
@@ -230,7 +229,6 @@ The GUI's Settings page edits the same file.
 | `audio.silence_alert_seconds` | `30` | Silence duration before warning |
 | `audio.minimize_warn_seconds` | `60` | Minimized duration before warning |
 | `ui.appearance` | `auto` | `auto` follows Windows light/dark; `light` or `dark` forces it |
-| `ui.native_frame` | `false` | `true` keeps the standard Windows title bar instead of the macOS traffic lights |
 
 Missing keys are filled with these defaults on load; unknown keys are preserved
 on save.
@@ -317,9 +315,9 @@ ghostrec-obs/
 │       ├── pages/             #   record, live, library, settings
 │       ├── assets/            #   logo + control SVGs, app.ico
 │       ├── branding.py        #   QIcon helpers
-│       ├── theme.py           #   macOS light/dark palette + QSS
-│       ├── chrome.py          #   traffic lights, frameless move/resize
-│       ├── dialogs.py         #   macOS-style alerts
+│       ├── theme.py           #   Windows 11 light/dark palette + QSS
+│       ├── chrome.py          #   title bar colors, Fluent icon glyphs
+│       ├── dialogs.py         #   themed alerts
 │       ├── widgets.py         #   reusable widgets
 │       ├── preview.py         #   live preview worker
 │       └── tray.py            #   system tray

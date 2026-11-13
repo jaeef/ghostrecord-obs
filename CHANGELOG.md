@@ -2,6 +2,21 @@
 
 All notable changes to GhostRec OBS. Dates are release dates (YYYY-MM-DD).
 
+## [Unreleased]
+
+### Changed
+- Windows 11 look instead of macOS: native title bar (recolored to match),
+  Segoe Fluent icons, soft orange accent, Windows button order in dialogs.
+- OBS-style cues: the app logo (title bar, taskbar, tray), timer and REC
+  badge are red while recording (covered is normal) and yellow only when the
+  recording is at risk: minimized, may freeze, or output restarting.
+- Record page cards fill the row (as many columns as fit), titles wrap to two
+  readable lines, and app logos come from the window itself (Store apps too).
+- GhostRec shows its own logo in the taskbar instead of Python's.
+
+### Removed
+- Traffic-light window controls and the `ui.native_frame` setting.
+
 ## [1.2.0] - 2026-11-13
 
 ### Fixed

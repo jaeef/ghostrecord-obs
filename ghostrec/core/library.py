@@ -109,7 +109,7 @@ def show_in_explorer(path):
 
 
 def delete_recording(path):
-    """Move a recording to the Recycle Bin (recoverable), like macOS Trash.
+    """Move a recording to the Recycle Bin (recoverable).
 
     Raises OSError when the shell refuses (file locked, missing, ...).
     """

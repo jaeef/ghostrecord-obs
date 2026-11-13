@@ -1,8 +1,8 @@
-"""macOS-style theme (light + dark) for the GhostRec desktop UI.
+"""Windows 11 (Fluent) theme, light + dark, with a soft orange accent.
 
-Colors follow Apple's system palette (systemBlue, systemRed, label colors,
-grouped backgrounds) so the app reads like a native macOS utility, while
-still running on Windows with Qt.
+Surfaces and text follow the Windows 11 palette; the accent is soft orange
+with dark text on top (white on soft orange fails contrast). Red = recording,
+yellow = recording at risk, like OBS.
 
 Other modules read colors as ``theme.NAME`` at *call* time, so switching the
 appearance at runtime (``apply(app, "dark")``) updates everything that paints
@@ -15,81 +15,82 @@ from PyQt6.QtWidgets import QApplication
 
 from ghostrec.ui import branding
 
-FONT_UI = '"SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Inter", sans-serif'
-FONT_DISPLAY = ('"SF Pro Display", "Segoe UI Variable Display", "Segoe UI", '
-                '"Inter", sans-serif')
-FONT_MONO = '"SF Mono", "Cascadia Mono", "Consolas", monospace'
+FONT_UI = '"Segoe UI Variable Text", "Segoe UI", sans-serif'
+FONT_DISPLAY = '"Segoe UI Variable Display", "Segoe UI", sans-serif'
+FONT_MONO = '"Cascadia Mono", "Consolas", monospace'
+# Windows' own icon font (Win11), MDL2 on Windows 10
+FONT_ICONS = '"Segoe Fluent Icons", "Segoe MDL2 Assets"'
 
 DARK = {
     "MODE": "dark",
-    # surfaces
-    "BG": "#1e1e1e",            # window content
-    "BG_SIDEBAR": "#2a2a2c",    # source list (vibrant sidebar look)
-    "BG_TOOLBAR": "#1e1e1e",
-    "BG_ALT": "#232325",        # alternate rows / list bg
-    "BG_CARD": "#2c2c2e",       # secondarySystemGroupedBackground
-    "BG_ELEVATED": "#3a3a3c",
-    "BG_INPUT": "#1c1c1e",
-    "BG_CONTROL": "#48484a",    # push button face
-    "BG_CONTROL_HOVER": "#545456",
-    "BG_CONTROL_PRESSED": "#5e5e60",
-    "BORDER": "#3d3d3f",
-    "BORDER_SOFT": "#2f2f31",
-    "SEPARATOR": "#0f0f10",
-    # labels
-    "TEXT": "#f5f5f7",
-    "MUTED": "#98989d",         # secondaryLabel
-    "DIMMED": "#6e6e73",        # tertiaryLabel
-    "FILL": "#3a3a3c",          # quaternary fill (meter off, tracks)
-    # system colors
-    "ACCENT": "#0a84ff",
-    "ACCENT_HOVER": "#409cff",
-    "ACCENT_PRESSED": "#0071e3",
-    "OK": "#30d158",
-    "WARN": "#ff9f0a",
-    "ERR": "#ff453a",
-    "IDLE": "#8e8e93",
-    "SELECTION": "#0a84ff",
-    "SELECTION_TEXT": "#ffffff",
-    "SIDEBAR_SELECTION": "#464649",
-    "PREVIEW_BG": "#0b0b0c",
-    # traffic lights
-    "TL_CLOSE": "#ff5f57", "TL_MIN": "#febc2e", "TL_ZOOM": "#28c840",
-    "TL_INACTIVE": "#4d4d50", "TL_GLYPH": "#4d0000",
+    # surfaces (Windows 11 dark)
+    "BG": "#202020",
+    "BG_SIDEBAR": "#1c1c1c",
+    "BG_TOOLBAR": "#202020",
+    "BG_ALT": "#272727",
+    "BG_CARD": "#2b2b2b",
+    "BG_ELEVATED": "#2c2c2c",
+    "BG_INPUT": "#1d1d1d",
+    "BG_CONTROL": "#373737",
+    "BG_CONTROL_HOVER": "#3d3d3d",
+    "BG_CONTROL_PRESSED": "#323232",
+    "BORDER": "#454545",
+    "BORDER_SOFT": "#333333",
+    "SEPARATOR": "#2a2a2a",
+    # text
+    "TEXT": "#ffffff",
+    "MUTED": "#b8b8b8",
+    "DIMMED": "#8a8a8a",
+    "FILL": "#3a3a3a",
+    # soft orange accent; ACCENT_FG = accent used as text on surfaces
+    "ACCENT": "#ffa45c",
+    "ACCENT_HOVER": "#ffb47a",
+    "ACCENT_PRESSED": "#ec9149",
+    "ACCENT_TEXT": "#1b1b1b",
+    "ACCENT_FG": "#ffb47a",
+    # status: OBS red, at-risk yellow
+    "OK": "#6ccb5f",
+    "WARN": "#fce100",
+    "ERR": "#e5484d",
+    "IDLE": "#8a8a8a",
+    "SELECTION": "#ffa45c",
+    "SELECTION_TEXT": "#1b1b1b",
+    "SIDEBAR_SELECTION": "#2d2d2d",
+    "PREVIEW_BG": "#0c0c0c",
 }
 
 LIGHT = {
     "MODE": "light",
-    "BG": "#ffffff",
-    "BG_SIDEBAR": "#ececee",
-    "BG_TOOLBAR": "#ffffff",
-    "BG_ALT": "#f5f5f7",
-    "BG_CARD": "#f5f5f7",
+    "BG": "#f3f3f3",
+    "BG_SIDEBAR": "#ebebeb",
+    "BG_TOOLBAR": "#f3f3f3",
+    "BG_ALT": "#fafafa",
+    "BG_CARD": "#ffffff",
     "BG_ELEVATED": "#ffffff",
     "BG_INPUT": "#ffffff",
-    "BG_CONTROL": "#ffffff",
-    "BG_CONTROL_HOVER": "#f5f5f7",
-    "BG_CONTROL_PRESSED": "#e8e8ed",
-    "BORDER": "#d2d2d7",
-    "BORDER_SOFT": "#e5e5ea",
-    "SEPARATOR": "#dcdce0",
-    "TEXT": "#1d1d1f",
-    "MUTED": "#6e6e73",
-    "DIMMED": "#a1a1a6",
-    "FILL": "#e5e5ea",
-    "ACCENT": "#007aff",
-    "ACCENT_HOVER": "#1a88ff",
-    "ACCENT_PRESSED": "#0062cc",
-    "OK": "#28a745",
-    "WARN": "#ff9500",
-    "ERR": "#ff3b30",
-    "IDLE": "#8e8e93",
-    "SELECTION": "#007aff",
-    "SELECTION_TEXT": "#ffffff",
-    "SIDEBAR_SELECTION": "#d6d6db",
-    "PREVIEW_BG": "#1d1d1f",
-    "TL_CLOSE": "#ff5f57", "TL_MIN": "#febc2e", "TL_ZOOM": "#28c840",
-    "TL_INACTIVE": "#d1d1d6", "TL_GLYPH": "#4d0000",
+    "BG_CONTROL": "#fbfbfb",
+    "BG_CONTROL_HOVER": "#f5f5f5",
+    "BG_CONTROL_PRESSED": "#eeeeee",
+    "BORDER": "#d6d6d6",
+    "BORDER_SOFT": "#e5e5e5",
+    "SEPARATOR": "#dedede",
+    "TEXT": "#1b1b1b",
+    "MUTED": "#5c5c5c",
+    "DIMMED": "#6e6e6e",   # 4.7:1 on the light surface (small hint text)
+    "FILL": "#e6e6e6",
+    "ACCENT": "#f6a15b",
+    "ACCENT_HOVER": "#f8b077",
+    "ACCENT_PRESSED": "#e58d45",
+    "ACCENT_TEXT": "#1b1b1b",
+    "ACCENT_FG": "#a8530f",
+    "OK": "#0f7b0f",
+    "WARN": "#8a5a00",     # amber that still reads as small text on white
+    "ERR": "#c42b1c",
+    "IDLE": "#8a8a8a",
+    "SELECTION": "#f6a15b",
+    "SELECTION_TEXT": "#1b1b1b",
+    "SIDEBAR_SELECTION": "#dcdcdc",
+    "PREVIEW_BG": "#1c1c1c",
 }
 
 # --- module-level tokens (overwritten by _use) ----------------------------- #
@@ -98,8 +99,8 @@ BG = BG_SIDEBAR = BG_TOOLBAR = BG_ALT = BG_CARD = BG_ELEVATED = BG_INPUT = ""
 BG_CONTROL = BG_CONTROL_HOVER = BG_CONTROL_PRESSED = ""
 BORDER = BORDER_SOFT = SEPARATOR = TEXT = MUTED = DIMMED = FILL = ""
 ACCENT = ACCENT_HOVER = ACCENT_PRESSED = OK = WARN = ERR = IDLE = ""
+ACCENT_TEXT = ACCENT_FG = ""
 SELECTION = SELECTION_TEXT = SIDEBAR_SELECTION = PREVIEW_BG = ""
-TL_CLOSE = TL_MIN = TL_ZOOM = TL_INACTIVE = TL_GLYPH = ""
 # tinted state colors (computed)
 OK_BG = OK_BORDER = REC_BG = REC_BORDER = WARN_BG = WARN_BORDER = ""
 IDLE_BG = IDLE_BORDER = ACCENT_MUTED = ""
@@ -151,8 +152,8 @@ def _url(path):
 
 
 def build_qss():
-    check = _url(branding.ASSETS / "check.svg")
-    chevrons = _url(branding.ASSETS / "chevrons.svg")
+    check = _url(branding.ASSETS / "check-dark.svg")
+    chevrons = _url(branding.ASSETS / "chevrons-dark.svg")
     chevron_up = _url(branding.ASSETS / ("chevron-up-light.svg" if is_dark()
                                          else "chevron-up-dark.svg"))
     chevron_down = _url(branding.ASSETS / ("chevron-down-light.svg" if is_dark()
@@ -218,6 +219,12 @@ QLabel#bigTimer {{
     font-family: {FONT_DISPLAY};
     color: {TEXT}; font-size: 44px; font-weight: 300;
 }}
+QLabel#recBadge[state="warn"] {{
+    background: {WARN_BG}; color: {WARN}; border: 1px solid {WARN_BORDER};
+    border-radius: 9px; padding: 1px 8px; font-size: 10px; font-weight: 700;
+}}
+QLabel#bigTimer[state="rec"] {{ color: {ERR}; }}
+QLabel#bigTimer[state="warn"] {{ color: {WARN}; }}
 QLabel#recBadge {{
     background: {REC_BG}; color: {ERR}; border: 1px solid {REC_BORDER};
     border-radius: 9px; padding: 1px 8px; font-size: 10px; font-weight: 700;
@@ -237,8 +244,9 @@ QWidget#inspectorFooter {{
     background: transparent; border-top: 1px solid {BORDER_SOFT};
     border-bottom-left-radius: 12px; border-bottom-right-radius: 12px;
 }}
-QLabel#noticeIconWarn {{ color: {WARN}; font-size: 15px; background: transparent; }}
-QLabel#noticeIconOk {{ color: {OK}; font-size: 15px; font-weight: 700;
+QLabel#noticeIconWarn {{ color: {WARN}; font-family: {FONT_ICONS}; font-size: 16px;
+    background: transparent; }}
+QLabel#noticeIconOk {{ color: {OK}; font-family: {FONT_ICONS}; font-size: 16px;
     background: transparent; }}
 QWidget#resultBox {{
     background: {OK_BG}; border: 1px solid {OK_BORDER}; border-radius: 10px;
@@ -246,7 +254,8 @@ QWidget#resultBox {{
 QLabel#resultText {{ color: {TEXT}; background: transparent; }}
 QPushButton#closeButton {{
     background: transparent; border: none; color: {MUTED};
-    border-radius: 11px; padding: 0; min-height: 0; font-size: 11px;
+    border-radius: 11px; padding: 0; min-height: 0; font-size: 10px;
+    font-family: {FONT_ICONS};
 }}
 QPushButton#closeButton:hover {{ background: {rgba(TEXT, 0.10)}; color: {TEXT}; }}
 QLabel#mono {{
@@ -267,7 +276,7 @@ QPushButton:disabled {{
     border-color: {BORDER_SOFT};
 }}
 QPushButton#primary {{
-    background: {ACCENT}; color: white; border: 1px solid {ACCENT_PRESSED};
+    background: {ACCENT}; color: {ACCENT_TEXT}; border: 1px solid {ACCENT_PRESSED};
     font-weight: 600; padding: 5px 18px;
 }}
 QPushButton#primary:hover {{ background: {ACCENT_HOVER}; }}
@@ -284,7 +293,7 @@ QPushButton#danger:disabled {{
     background: {FILL}; color: {DIMMED}; border-color: {FILL};
 }}
 QPushButton#accent {{
-    background: {ACCENT_MUTED}; color: {ACCENT}; border: 1px solid transparent;
+    background: {ACCENT_MUTED}; color: {ACCENT_FG}; border: 1px solid transparent;
     font-weight: 600;
 }}
 QPushButton#accent:hover {{ background: {rgba(ACCENT, 0.24)}; }}
@@ -299,7 +308,7 @@ QLineEdit, QSpinBox, QDoubleSpinBox {{
     background: {BG_INPUT}; color: {TEXT};
     border: 1px solid {control_border}; border-radius: 6px;
     padding: 4px 8px; min-height: 20px;
-    selection-background-color: {ACCENT}; selection-color: white;
+    selection-background-color: {ACCENT}; selection-color: {ACCENT_TEXT};
 }}
 QLineEdit#searchField {{
     border-radius: 7px; padding-left: 10px; background: {rgba(TEXT, 0.06)};
@@ -337,7 +346,7 @@ QComboBox QAbstractItemView {{
     background: {BG_ELEVATED}; color: {TEXT};
     border: 1px solid {BORDER}; border-radius: 6px; padding: 4px;
     outline: none;
-    selection-background-color: {ACCENT}; selection-color: white;
+    selection-background-color: {ACCENT}; selection-color: {ACCENT_TEXT};
 }}
 
 QCheckBox {{ spacing: 8px; color: {TEXT}; }}
@@ -444,7 +453,7 @@ QMenu {{
     padding: 5px;
 }}
 QMenu::item {{ padding: 4px 18px; border-radius: 4px; }}
-QMenu::item:selected {{ background: {ACCENT}; color: white; }}
+QMenu::item:selected {{ background: {ACCENT}; color: {ACCENT_TEXT}; }}
 QMenu::item:disabled {{ color: {DIMMED}; }}
 QMenu::separator {{ height: 1px; background: {BORDER}; margin: 5px 8px; }}
 QMessageBox {{ background: {BG}; }}
@@ -468,8 +477,10 @@ QPushButton#segment:checked {{
     font-weight: 600; border: 1px solid {rgba(TEXT, 0.08)};
 }}
 QPushButton#iconButton {{
-    padding: 0; font-size: 15px; border-radius: 7px; min-height: 0;
+    padding: 0; font-family: {FONT_ICONS}; font-size: 14px;
+    border-radius: 7px; min-height: 0;
 }}
+QLabel#glyph {{ font-family: {FONT_ICONS}; background: transparent; }}
 QListWidget#windowGrid {{
     background: transparent; border: none; padding: 0;
 }}
@@ -504,7 +515,7 @@ QLabel#bigThumb {{
     border: 1px solid {BORDER_SOFT};
 }}
 QPushButton#linkButton {{
-    background: transparent; border: none; color: {ACCENT};
+    background: transparent; border: none; color: {ACCENT_FG};
     font-weight: 600; padding: 0 2px; min-height: 0;
 }}
 QPushButton#linkButton:hover {{ text-decoration: underline; }}
@@ -533,7 +544,22 @@ QLabel#emptyState {{
     border-radius: 10px; font-size: 12px;
 }}
 
-/* ---- macOS alert (ghostrec.ui.dialogs) ---------------------------------- */
+/* ---- keyboard focus (visible on every control) ------------------------ */
+QPushButton:focus, QPushButton#ghost:focus, QPushButton#segment:focus,
+QPushButton#iconButton:focus, QPushButton#accent:focus,
+QComboBox:focus {{
+    border: 1px solid {ACCENT_FG};
+}}
+QPushButton#primary:focus, QPushButton#danger:focus,
+QPushButton#recordButton:focus, QPushButton#alertPrimary:focus,
+QPushButton#alertButton:focus, QPushButton#alertDestructive:focus {{
+    border: 2px solid {TEXT};
+}}
+QPushButton#linkButton:focus {{ text-decoration: underline; }}
+QCheckBox::indicator:focus {{ border: 1px solid {ACCENT_FG}; }}
+QListWidget#windowGrid:focus {{ border: none; }}
+
+/* ---- alerts (ghostrec.ui.dialogs) ---------------------------------- */
 QWidget#alertCard {{
     background: {BG_ELEVATED if is_dark() else "#ffffff"};
     border: 1px solid {rgba(TEXT, 0.12)}; border-radius: 14px;
@@ -555,7 +581,7 @@ QPushButton#alertButton {{
 }}
 QPushButton#alertButton:hover {{ background: {rgba(TEXT, 0.16)}; }}
 QPushButton#alertPrimary {{
-    background: {ACCENT}; color: white; border: none; font-weight: 600;
+    background: {ACCENT}; color: {ACCENT_TEXT}; border: none; font-weight: 600;
 }}
 QPushButton#alertPrimary:hover {{ background: {ACCENT_HOVER}; }}
 QPushButton#alertPrimary:pressed {{ background: {ACCENT_PRESSED}; }}
@@ -581,8 +607,8 @@ def apply(app: QApplication, appearance="auto") -> str:
     pal.setColor(QPalette.ColorRole.Button, QColor(BG_CONTROL))
     pal.setColor(QPalette.ColorRole.ButtonText, QColor(TEXT))
     pal.setColor(QPalette.ColorRole.Highlight, QColor(ACCENT))
-    pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
-    pal.setColor(QPalette.ColorRole.Link, QColor(ACCENT))
+    pal.setColor(QPalette.ColorRole.HighlightedText, QColor(ACCENT_TEXT))
+    pal.setColor(QPalette.ColorRole.Link, QColor(ACCENT_FG))
     pal.setColor(QPalette.ColorRole.ToolTipBase, QColor(BG_ELEVATED))
     pal.setColor(QPalette.ColorRole.ToolTipText, QColor(TEXT))
     pal.setColor(QPalette.ColorRole.PlaceholderText, QColor(DIMMED))

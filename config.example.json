@@ -22,7 +22,6 @@
     "minimize_warn_seconds": 60
   },
   "ui": {
-    "appearance": "auto",
-    "native_frame": false
+    "appearance": "auto"
   }
 }

@@ -1,4 +1,4 @@
-"""QApplication bootstrap: macOS-style theme, single-instance guard, main window."""
+"""QApplication bootstrap: Windows 11 theme, single-instance guard, main window."""
 
 import sys
 
@@ -13,6 +13,12 @@ _SINGLE_KEY = "ghostrec-obs-single-instance"
 
 
 def main():
+    if sys.platform == "win32":
+        # Without this, Windows groups the window under python.exe and shows
+        # the Python logo in the taskbar instead of GhostRec's icon.
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "GhostRec.OBS")
     QCoreApplication.setApplicationName("GhostRec OBS")
     QCoreApplication.setOrganizationName("GhostRec")
 
